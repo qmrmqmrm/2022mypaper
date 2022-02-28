@@ -1,6 +1,6 @@
 import glob, json, os
 import numpy as np
-import util.util_function as uf
+import util_function as uf
 
 
 def save_bin(save_dirctory, data, file_name):
@@ -74,7 +74,7 @@ def load_bin(root_path):
     velodyne = dict()
     # print(file_names)
     num_files = len(file_names)
-    for i, file_name_lidar in enumerate(file_names[:2]):
+    for i, file_name_lidar in enumerate(file_names[:10]):
         file_num = file_name_lidar.split("/")[-1]
         file_num = file_num.split(".")[0]
         with open(file_name_lidar, 'rb') as f:
