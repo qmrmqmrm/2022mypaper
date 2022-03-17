@@ -74,7 +74,7 @@ def load_bin(root_path):
     velodyne = dict()
     # print(file_names)
     num_files = len(file_names)
-    for i, file_name_lidar in enumerate(file_names[:10]):
+    for i, file_name_lidar in enumerate(file_names):
         file_num = file_name_lidar.split("/")[-1]
         file_num = file_num.split(".")[0]
         with open(file_name_lidar, 'rb') as f:
