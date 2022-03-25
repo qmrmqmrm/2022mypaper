@@ -30,6 +30,7 @@ class PreparationImage:
         self.min_1 = 999999
         self.min_2 = 999999
         self.min_3 = 999999
+        self.basic_plane = [-0.01958795, -0.00710267, 0.99978291, 1.755962]
         # self.max = [-99999,-99999,-99999]
         # self.min = [99999,99999,99999]
 
@@ -45,17 +46,16 @@ class PreparationImage:
         num = len(self.velodyne_points.items())
         count = 0
         for key, value in self.velodyne_points.items():
+            print()
             start_time = time.time()
 
             # image_param shape : (N,6) :[rotated_points(x,y,z), points_z, reflence, normal_theta]
             image_param = self.get_image_param(value, tbev_pose, cell_size, grid_shape)
             # pixels shape : (N,2)
-            flpixels = self.pixel_coordinates(image_param[:, :2], cell_size, grid_shape)
+            flpixels = self.pixel_coordinates(image_param[:, :2], tbev_pose, cell_size, grid_shape)
             # depthmap shape : (grid_shape, grid_shape, 3)
-            depthmap = self.interporation(flpixels, image_param, grid_shape)
+            depthmap = self.interpolation(flpixels, image_param, grid_shape)
             normal_depthmap = self.normalization(depthmap)
-
-
 
             # show_image = np.concatenate([bev_depthmap,depthmap_30,depthmap_45, depthmap_60],axis=1)
             # print(show_image.shape)
@@ -64,27 +64,24 @@ class PreparationImage:
             os.makedirs(save_dir, exist_ok=True)
             save_file = os.path.join(save_dir, f"{key}.jpg")
             result_depthmap = (normal_depthmap * 255).astype(np.uint8)
-            self.max_1 = max(np.max(result_depthmap[:, :, 0]), self.max_1)
-            self.max_2 = max(np.max(result_depthmap[:, :, 1]), self.max_2)
-            self.max_3 = max(np.max(result_depthmap[:, :, 2]), self.max_3)
-            self.min_1 = min(np.min(result_depthmap[:, :, 0]), self.min_1)
-            self.min_2 = min(np.min(result_depthmap[:, :, 1]), self.min_2)
-            self.min_3 = min(np.min(result_depthmap[:, :, 2]), self.min_3)
+            self.max_1 = max(np.max(normal_depthmap[:, :, 0]), self.max_1)
+            self.max_2 = max(np.max(normal_depthmap[:, :, 1]), self.max_2)
+            self.max_3 = max(np.max(normal_depthmap[:, :, 2]), self.max_3)
+            self.min_1 = min(np.min(normal_depthmap[:, :, 0]), self.min_1)
+            self.min_2 = min(np.min(normal_depthmap[:, :, 1]), self.min_2)
+            self.min_3 = min(np.min(normal_depthmap[:, :, 2]), self.min_3)
             # img = cv2.imread(result_depthmap)
             cv2.imwrite(save_file, result_depthmap)
             count += 1
             end_time = time.time()
             step_time = end_time - start_time
             full_time = step_time * (num - count)
-            uf.print_progress(f"-- Progress: {count}/{num} time : {step_time} fin_time : {full_time}")
-            print("\n")
-            print("all")
-            print(self.max_1)
-            print(self.max_2)
-            print(self.max_3)
-            print(self.min_1)
-            print(self.min_2)
-            print(self.min_3)
+            uf.print_progress(
+                f"-- Progress:  deg : {deg}, {count}/{num} time : {step_time} fin_time : {full_time:.4f} ")
+            # print()
+            assert (self.max_1 <= 1) or (self.min_1 >= 0)
+            assert (self.max_2 <= 1) or (self.min_2 >= 0)
+            assert (self.max_3 <= 1) or (self.min_3 >= 0)
 
     def get_image_param(self, value, tbev_pose, cell_size, grid_shape):
         limited_meter = cell_size * grid_shape
@@ -110,31 +107,61 @@ class PreparationImage:
         :return:
         rotated_points : transformation points with tbev_pose
         """
+        start_time = time.time()
+        # print('get_rotation_and_normal_vector')
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
-        plane_model = self.get_ground_points(pcd)
-        height = self.get_point_to_plane_dis(plane_model, points)
-        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=1000))
+        height = self.get_ground_height(pcd, points)
+        search_param = o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=20)
+        pcd.estimate_normals(search_param)
         points_normals = np.asarray(pcd.normals)[:, 0:3:2]
         normal_theta = np.arctan2(points_normals[:, 1:], points_normals[:, 0:1])
         normal_theta = normal_theta % (2 * np.pi)
         pcd.rotate(pcd.get_rotation_matrix_from_xyz((0, tbev_pose, 0)))
         rotated_points = np.asarray(pcd.points)[:, :3]
+        end_time = time.time()
+        # print('get_rotation_and_normal_vector time', end_time - start_time)
 
         return rotated_points, normal_theta, height
 
-    def get_ground_points(self, pcd):
-        plane_model, inliers = pcd.segment_plane(distance_threshold=0.05,
-                                                 ransac_n=5,
-                                                 num_iterations=5000)
-        return np.array(plane_model)
+    def get_ground_height(self, pcd, points):
+        start_time = time.time()
+        points_vaild = (points[:, 2] < -1.0)  # & (points[:, 2] < -1.5)
+        rote_pcd = o3d.geometry.PointCloud()
+        rote_pcd.points = o3d.utility.Vector3dVector(points[points_vaild, :])
+        plane_model, inliers = rote_pcd.segment_plane(distance_threshold=0.05, ransac_n=3, num_iterations=200)
 
-    def get_point_to_plane_dis(self, plane_model, points):
-        dist = np.abs(plane_model[0:1] * points[:, 0:1] + plane_model[1:2] * points[:, 1:2] +
-                      plane_model[2:3] * points[:, 2:3] + plane_model[3:4]) / np.sum(np.power(plane_model, 2))
-        return dist
+        a, b, c, d = plane_model
+        norm_vector = np.array([a, b, c])
+        basic_vector = np.array(self.basic_plane[:3])
+        norm_dist = np.sqrt(np.sum(np.power(norm_vector, 2)))
+        basic_dist = np.sqrt(np.sum(np.power(basic_vector, 2)))
+        norm_vector = norm_vector / norm_dist
+        basic_vector = basic_vector / basic_dist
+        norm_dist = np.sqrt(np.sum(np.power(norm_vector, 2)))
+        basic_dist = np.sqrt(np.sum(np.power(basic_vector, 2)))
+        print("dist")
+        print(norm_dist, basic_dist)
+        check_theta = np.dot(norm_vector, basic_vector)
+        print(check_theta)
+        check_theta = np.arccos(check_theta)
+        # check_d = d - self.basic_plane[3]
+        # print('check_theta', check_theta)
+        # print('check_theta', check_theta * (180 / np.pi))
+        # print('check_d', d)
+        # print('check_d', check_d)
 
-    def pixel_coordinates(self, rotated_xy, cell_size, grid_shape):
+        assert -0.2 < check_theta < 0.2, f"{check_theta}"
+        # assert -0.3 < check_d < 0.3, f"{check_d}"
+        plane_model = np.array(plane_model)
+        height = np.abs(plane_model[0:1] * points[:, 0:1] + plane_model[1:2] * points[:, 1:2] +
+                        plane_model[2:3] * points[:, 2:3] + plane_model[3:4]) / np.sum(np.power(plane_model, 2))
+        end_time = time.time()
+        # print(height.shape)
+        # print('get_ground_points time', end_time - start_time)
+        return height
+
+    def pixel_coordinates(self, rotated_xy, tbev_pose, cell_size, grid_shape):
         """
 
         :param image_param: [rotated_points(x,y,z), height, reflence, normal_theta]
@@ -142,13 +169,13 @@ class PreparationImage:
         :param grid_shape: (default : 500)
         :return:
         """
-
+        print((cell_size * np.cos(tbev_pose)))
         image_x = (grid_shape / 2) - (rotated_xy[:, 1:2] / cell_size)
-        image_y = (grid_shape) - (rotated_xy[:, 0:1] / cell_size)
+        image_y = (grid_shape) - (rotated_xy[:, 0:1] / (cell_size * np.cos(tbev_pose)))
         pixels = np.concatenate([image_x, image_y], axis=1)
         return pixels
 
-    def interporation(self, pixels, points, grid_shape):
+    def interpolation(self, pixels, points, grid_shape):
         """
 
         :param pixels: (N,2) float
@@ -157,6 +184,7 @@ class PreparationImage:
         :param grid_shape: default 500
         :return:
         """
+        start_time = time.time()
         imshape = [grid_shape, grid_shape, 3]
         valid_mask = (pixels[:, 0] >= 0) & (pixels[:, 0] < imshape[1] - 1) & (pixels[:, 1] >= 0) & (
                 pixels[:, 1] < imshape[0] - 1)
@@ -177,6 +205,8 @@ class PreparationImage:
             diff = 1 - np.abs(flpixels - qtpixels.values)
             # weights = (1-abs(x-xn)) * (1-abs(y-yn)) [N]
             weights = diff[:, 0] * diff[:, 1]
+            weights = np.expand_dims(weights, axis=1)
+            weights = np.tile(weights, 3)
 
             step = 0
             while (len(qtpixels.index) > 0) and (step < 5):
@@ -185,17 +215,14 @@ class PreparationImage:
                 rows = step_pixels['row'].values
                 cols = step_pixels['col'].values
                 inds = step_pixels.index.values
-
-                depthmap[rows, cols, 0] += points[inds, 3] * weights[inds]
-                depthmap[rows, cols, 1] += points[inds, 4] * weights[inds]
-                depthmap[rows, cols, 2] += points[inds, 5] * weights[inds]
-                weightmap[rows, cols, 0] += weights[inds]
-                weightmap[rows, cols, 1] += weights[inds]
-                weightmap[rows, cols, 2] += weights[inds]
+                depthmap[rows, cols, :] += points[inds, 3:6] * weights[inds, :]
+                weightmap[rows, cols, :] += weights[inds, :]
                 qtpixels = qtpixels[~qtpixels.index.isin(step_pixels.index)]
 
         depthmap[depthmap > 0] = depthmap[depthmap > 0] / weightmap[depthmap > 0]
         depthmap[weightmap < 0.5] = 0
+        end_time = time.time()
+        # print('interpolation time', end_time - start_time)
 
         return depthmap
 
@@ -204,9 +231,9 @@ class PreparationImage:
         intensity_scale = (0.0, 1.0)
         normal_theta = (0, 2 * np.pi)
         normal_depthmap = np.zeros_like(depthmap)
-        normal_depthmap[:,:, 0] = depthmap[:,:, 0] / height_scale[1]
-        normal_depthmap[:,:, 1] = depthmap[:,:, 1] / intensity_scale[1]
-        normal_depthmap[:,:, 2] = depthmap[:,:, 2] / normal_theta[1]
+        normal_depthmap[:, :, 0] = depthmap[:, :, 0] / height_scale[1]
+        normal_depthmap[:, :, 1] = depthmap[:, :, 1] / intensity_scale[1]
+        normal_depthmap[:, :, 2] = depthmap[:, :, 2] / normal_theta[1]
         return normal_depthmap
 
 
@@ -214,7 +241,7 @@ if __name__ == '__main__':
     root_path = '/media/falcon/IanBook8T/datasets/kitti_detection/data_object_velodyne/training/velodyne'
     cl = PreparationImage(root_path, show_view=False)
     theta = np.arange(0, np.pi / 2, np.pi / 12)
-    for tbev_pose in theta[2:]:
+    for tbev_pose in theta[1:]:
         print('tbev_pose', tbev_pose)
         cl.get_image(tbev_pose=tbev_pose)
     # velodyne_points = ls.load_bin(root_path)
