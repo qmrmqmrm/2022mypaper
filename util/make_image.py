@@ -1,4 +1,4 @@
-#!/home/falcon/.pyenv/versions/paper/bin/python
+#!/home/dolphin/.pyenv/versions/paper/bin/python
 import sys
 import shutil
 import math
@@ -14,7 +14,20 @@ import copy
 import time
 
 import util.util_function as uf
+import util.error_check as ec
 import load_and_save as ls
+import config as cfg
+
+
+def normalization(depthmap):
+    height_scale = (0.0, 3.0)
+    intensity_scale = (0.0, 1.0)
+    normal_theta = (0, 2 * np.pi)
+    normal_depthmap = np.zeros_like(depthmap)
+    normal_depthmap[:, :, 0] = depthmap[:, :, 0] / height_scale[1]
+    normal_depthmap[:, :, 1] = depthmap[:, :, 1] / intensity_scale[1]
+    normal_depthmap[:, :, 2] = depthmap[:, :, 2] / normal_theta[1]
+    return normal_depthmap
 
 
 class PreparationImage:
@@ -23,16 +36,8 @@ class PreparationImage:
         self.show_view = show_view
         # self.theta = theta
         self.velodyne_points = ls.load_bin(root_path)
-        self.save_root = "/media/falcon/IanBook8T/datasets/kim_result"
-        self.max_1 = -999999
-        self.max_2 = -999999
-        self.max_3 = -999999
-        self.min_1 = 999999
-        self.min_2 = 999999
-        self.min_3 = 999999
+        self.save_root = cfg.Paths.SAVE_DIR
         self.basic_plane = [-0.01958795, -0.00710267, 0.99978291, 1.755962]
-        # self.max = [-99999,-99999,-99999]
-        # self.min = [99999,99999,99999]
 
     def get_image(self, tbev_pose=np.pi / 3, cell_size=0.05, grid_shape=500):
         """
@@ -55,33 +60,19 @@ class PreparationImage:
             flpixels = self.pixel_coordinates(image_param[:, :2], tbev_pose, cell_size, grid_shape)
             # depthmap shape : (grid_shape, grid_shape, 3)
             depthmap = self.interpolation(flpixels, image_param, grid_shape)
-            normal_depthmap = self.normalization(depthmap)
+            normal_depthmap = normalization(depthmap)
 
-            # show_image = np.concatenate([bev_depthmap,depthmap_30,depthmap_45, depthmap_60],axis=1)
-            # print(show_image.shape)
             deg = int(tbev_pose * (180 / np.pi))
             save_dir = f"{self.save_root}/deg_{deg}"
             os.makedirs(save_dir, exist_ok=True)
             save_file = os.path.join(save_dir, f"{key}.jpg")
             result_depthmap = (normal_depthmap * 255).astype(np.uint8)
-            self.max_1 = max(np.max(normal_depthmap[:, :, 0]), self.max_1)
-            self.max_2 = max(np.max(normal_depthmap[:, :, 1]), self.max_2)
-            self.max_3 = max(np.max(normal_depthmap[:, :, 2]), self.max_3)
-            self.min_1 = min(np.min(normal_depthmap[:, :, 0]), self.min_1)
-            self.min_2 = min(np.min(normal_depthmap[:, :, 1]), self.min_2)
-            self.min_3 = min(np.min(normal_depthmap[:, :, 2]), self.min_3)
-            # img = cv2.imread(result_depthmap)
             cv2.imwrite(save_file, result_depthmap)
             count += 1
             end_time = time.time()
             step_time = end_time - start_time
             full_time = step_time * (num - count)
-            uf.print_progress(
-                f"-- Progress:  deg : {deg}, {count}/{num} time : {step_time} fin_time : {full_time:.4f} ")
-            # print()
-            assert (self.max_1 <= 1) or (self.min_1 >= 0)
-            assert (self.max_2 <= 1) or (self.min_2 >= 0)
-            assert (self.max_3 <= 1) or (self.min_3 >= 0)
+            uf.print_progress(f"-- Progress: deg:{deg}, {count}/{num} time:{step_time} fin_time:{full_time:.4f} ")
 
     def get_image_param(self, value, tbev_pose, cell_size, grid_shape):
         limited_meter = cell_size * grid_shape
@@ -107,8 +98,6 @@ class PreparationImage:
         :return:
         rotated_points : transformation points with tbev_pose
         """
-        start_time = time.time()
-        # print('get_rotation_and_normal_vector')
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         height = self.get_ground_height(pcd, points)
@@ -119,46 +108,19 @@ class PreparationImage:
         normal_theta = normal_theta % (2 * np.pi)
         pcd.rotate(pcd.get_rotation_matrix_from_xyz((0, tbev_pose, 0)))
         rotated_points = np.asarray(pcd.points)[:, :3]
-        end_time = time.time()
-        # print('get_rotation_and_normal_vector time', end_time - start_time)
 
         return rotated_points, normal_theta, height
 
-    def get_ground_height(self, pcd, points):
-        start_time = time.time()
+    def get_ground_height(self, pcd, points, plane_check=False):
         points_vaild = (points[:, 2] < -1.0)  # & (points[:, 2] < -1.5)
         rote_pcd = o3d.geometry.PointCloud()
         rote_pcd.points = o3d.utility.Vector3dVector(points[points_vaild, :])
         plane_model, inliers = rote_pcd.segment_plane(distance_threshold=0.05, ransac_n=3, num_iterations=200)
-
-        a, b, c, d = plane_model
-        norm_vector = np.array([a, b, c])
-        basic_vector = np.array(self.basic_plane[:3])
-        norm_dist = np.sqrt(np.sum(np.power(norm_vector, 2)))
-        basic_dist = np.sqrt(np.sum(np.power(basic_vector, 2)))
-        norm_vector = norm_vector / norm_dist
-        basic_vector = basic_vector / basic_dist
-        norm_dist = np.sqrt(np.sum(np.power(norm_vector, 2)))
-        basic_dist = np.sqrt(np.sum(np.power(basic_vector, 2)))
-        print("dist")
-        print(norm_dist, basic_dist)
-        check_theta = np.dot(norm_vector, basic_vector)
-        print(check_theta)
-        check_theta = np.arccos(check_theta)
-        # check_d = d - self.basic_plane[3]
-        # print('check_theta', check_theta)
-        # print('check_theta', check_theta * (180 / np.pi))
-        # print('check_d', d)
-        # print('check_d', check_d)
-
-        assert -0.2 < check_theta < 0.2, f"{check_theta}"
-        # assert -0.3 < check_d < 0.3, f"{check_d}"
+        if plane_check:
+            ec.plane_check(plane_model)
         plane_model = np.array(plane_model)
         height = np.abs(plane_model[0:1] * points[:, 0:1] + plane_model[1:2] * points[:, 1:2] +
                         plane_model[2:3] * points[:, 2:3] + plane_model[3:4]) / np.sum(np.power(plane_model, 2))
-        end_time = time.time()
-        # print(height.shape)
-        # print('get_ground_points time', end_time - start_time)
         return height
 
     def pixel_coordinates(self, rotated_xy, tbev_pose, cell_size, grid_shape):
@@ -226,22 +188,12 @@ class PreparationImage:
 
         return depthmap
 
-    def normalization(self, depthmap):
-        height_scale = (0.0, 3.0)
-        intensity_scale = (0.0, 1.0)
-        normal_theta = (0, 2 * np.pi)
-        normal_depthmap = np.zeros_like(depthmap)
-        normal_depthmap[:, :, 0] = depthmap[:, :, 0] / height_scale[1]
-        normal_depthmap[:, :, 1] = depthmap[:, :, 1] / intensity_scale[1]
-        normal_depthmap[:, :, 2] = depthmap[:, :, 2] / normal_theta[1]
-        return normal_depthmap
-
 
 if __name__ == '__main__':
-    root_path = '/media/falcon/IanBook8T/datasets/kitti_detection/data_object_velodyne/training/velodyne'
+    root_path = cfg.Paths.VELO_ROOT
     cl = PreparationImage(root_path, show_view=False)
     theta = np.arange(0, np.pi / 2, np.pi / 12)
-    for tbev_pose in theta[1:]:
+    for tbev_pose in theta[0:1]:
         print('tbev_pose', tbev_pose)
         cl.get_image(tbev_pose=tbev_pose)
     # velodyne_points = ls.load_bin(root_path)
