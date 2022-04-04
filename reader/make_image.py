@@ -15,27 +15,19 @@ import time
 
 import util.util_function as uf
 import util.error_check as ec
-import load_and_save as ls
+import util.load_and_save as ls
 import config as cfg
-
-
-def normalization(depthmap):
-    height_scale = (0.0, 3.0)
-    intensity_scale = (0.0, 1.0)
-    normal_theta = (0, 2 * np.pi)
-    normal_depthmap = np.zeros_like(depthmap)
-    normal_depthmap[:, :, 0] = depthmap[:, :, 0] / height_scale[1]
-    normal_depthmap[:, :, 1] = depthmap[:, :, 1] / intensity_scale[1]
-    normal_depthmap[:, :, 2] = depthmap[:, :, 2] / normal_theta[1]
-    return normal_depthmap
 
 
 class PreparationImage:
     def __init__(self, root_path, show_view=False):
-        self.root_path = root_path
+        self.velo_path = cfg.Paths.VELO_ROOT
+        self.label_path = cfg.Paths.LABEL_ROOT
+        self.calib_path = cfg.Paths.CALIB_ROOT
         self.show_view = show_view
         # self.theta = theta
-        self.velodyne_points = ls.load_bin(root_path)
+        # self.velodyne_points = ls.load_bin(self.velo_path)
+        # self.img_labels = ls.load_txt(self.label_path)
         self.save_root = cfg.Paths.SAVE_DIR
         self.basic_plane = [-0.01958795, -0.00710267, 0.99978291, 1.755962]
 
@@ -47,32 +39,95 @@ class PreparationImage:
         :param grid_shape: image size / cell_size
         :return:
         """
-
-        num = len(self.velodyne_points.items())
+        # ls.load_kitti(self.velo_path,self.label_path,self.calib_path)
+        velo_files = sorted(glob.glob(os.path.join(self.velo_path, '*.bin')))
+        label_flies = sorted(glob.glob(os.path.join(self.label_path, '*.txt')))
+        calib_files = sorted(glob.glob(os.path.join(self.calib_path, '*.txt')))
+        num = len(velo_files)
         count = 0
-        for key, value in self.velodyne_points.items():
-            print()
+        for velo_file, label_flie, calib_file in zip(velo_files, label_flies, calib_files):
+            file_num = velo_file.split('/')[-1].split('.')[0]
+            velo = ls.load_velo(velo_file)  # numpy
+            label = ls.load_label(label_flie)  # numpy
+            calib = ls.read_calib_file(calib_file)  # dict
+            self.get_calib(calib)
+            annotations = self.get_annotations(label, file_num)
             start_time = time.time()
 
             # image_param shape : (N,6) :[rotated_points(x,y,z), points_z, reflence, normal_theta]
-            image_param = self.get_image_param(value, tbev_pose, cell_size, grid_shape)
+            image_param = self.get_image_param(velo, tbev_pose, cell_size, grid_shape)
+
+
             # pixels shape : (N,2)
             flpixels = self.pixel_coordinates(image_param[:, :2], tbev_pose, cell_size, grid_shape)
             # depthmap shape : (grid_shape, grid_shape, 3)
             depthmap = self.interpolation(flpixels, image_param, grid_shape)
-            normal_depthmap = normalization(depthmap)
+            normal_depthmap = uf.normalization(depthmap)
 
             deg = int(tbev_pose * (180 / np.pi))
             save_dir = f"{self.save_root}/deg_{deg}"
             os.makedirs(save_dir, exist_ok=True)
-            save_file = os.path.join(save_dir, f"{key}.jpg")
+            save_file = os.path.join(save_dir, f"{file_num}.jpg")
             result_depthmap = (normal_depthmap * 255).astype(np.uint8)
             cv2.imwrite(save_file, result_depthmap)
+
             count += 1
             end_time = time.time()
             step_time = end_time - start_time
             full_time = step_time * (num - count)
+
             uf.print_progress(f"-- Progress: deg:{deg}, {count}/{num} time:{step_time} fin_time:{full_time:.4f} ")
+
+    def get_calib(self, calib):
+        self.P = calib['P2']
+        self.P = np.reshape(self.P, [3, 4])
+        # Rigid transform from Velodyne coord to reference camera coord
+        self.V2C = calib['Tr_velo_to_cam']
+        self.V2C = np.reshape(self.V2C, [3, 4])
+        # self.C2V = inverse_rigid_trans(self.V2C)
+        # Rotation from reference camera coord to rect camera coord
+        self.R0 = calib['R0_rect']
+        self.R0 = np.reshape(self.R0, [3, 3])
+        self.C2V = inverse_rigid_trans(self.V2C)
+
+    def get_annotations(self, labels, file_num):
+        ann_id = 0
+        if (labels.ndim < 1):
+            labels = np.array(labels, ndmin=1)
+        annotations = []
+        for obj in labels:
+            print('obj', obj['type'])
+            if obj['type'] != 'DontCare':
+                location = np.array([[obj['location_1'], obj['location_2'], obj['location_3']]])  # cam xyz
+                pts_3d_ref = np.transpose(np.dot(np.linalg.inv(self.R0), np.transpose(location)))
+                yaw = obj['rotation_y']
+                n = pts_3d_ref.shape[0]
+                print(n)
+                pts_3d_ref = np.hstack((pts_3d_ref, np.ones((n, 1))))
+                he = np.array([0, 0, 1.73 / 2]).reshape([1, 3])
+                centroid = np.dot(pts_3d_ref, np.transpose(self.C2V)) + he
+
+                dimension = np.array([obj['dimensions_2'], obj['dimensions_3'], obj['dimensions_1']])  # wlh
+                corners = uf.get_box3d_corner(dimension)  # wlh
+                R = uf.create_rotation_matrix([yaw, 0, 0])
+                print(centroid)
+                rotated_corners = np.dot(corners, R) + centroid
+                rotated_corners = np.concatenate([rotated_corners, centroid], axis=0)
+                print(rotated_corners.shape)
+                # print(pv.shape)
+                ann = {}
+                ann['image_file'] = file_num
+                ann['ann_id'] = ann_id
+                ann['center'] = centroid
+                ann['dimension'] = dimension
+                ann_id += 1
+                ann['corners'] = rotated_corners
+                ann['category'] = obj['type']
+                ann['rotation_y'] = obj['rotation_y']
+                ann['alpha'] = obj['alpha']
+
+                annotations.append(ann)
+        return annotations
 
     def get_image_param(self, value, tbev_pose, cell_size, grid_shape):
         limited_meter = cell_size * grid_shape
@@ -187,6 +242,16 @@ class PreparationImage:
         # print('interpolation time', end_time - start_time)
 
         return depthmap
+
+
+def inverse_rigid_trans(Tr):
+    ''' Inverse a rigid body transform matrix (3x4 as [R|t])
+        [R'|-R't; 0|1]
+    '''
+    inv_Tr = np.zeros_like(Tr)  # 3x4
+    inv_Tr[0:3, 0:3] = np.transpose(Tr[0:3, 0:3])
+    inv_Tr[0:3, 3] = np.dot(-np.transpose(Tr[0:3, 0:3]), Tr[0:3, 3])
+    return inv_Tr
 
 
 if __name__ == '__main__':

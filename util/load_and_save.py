@@ -1,6 +1,6 @@
 import glob, json, os
 import numpy as np
-import util_function as uf
+import util.util_function as uf
 
 
 def save_bin(save_dirctory, data, file_name):
@@ -36,57 +36,61 @@ def save_txt_dict(save_dirctory, dict, file_name):
                 data = f"{catagoly}: {value}\n"
                 f.write(data)
 
+def read_calib_file(filepath):
+    data = {}
+    with open(filepath, 'r') as f:
+        for line in f.readlines():
+            line = line.rstrip()
+            if len(line) == 0: continue
+            key, value = line.split(':', 1)
+            # The only non-float values in these files are dates, which
+            # we don't care about anyway
+            try:
+                data[key] = np.array([float(x) for x in value.split()])
+            except ValueError:
+                pass
+    return data
 
-def load_json(path):
-    file_names = sorted(glob.glob(os.path.join(path, '*.json')))
-    assert file_names
-    configs = list()
-    for i, file_name in enumerate(file_names):
-        with open(file_name, 'r') as f:
-            config = json.load(f)
-        configs.append(config)
-    return configs
 
-
-def load_txt(path):
-    if path[-3:] == "txt":
-        file_names = sorted(glob.glob(os.path.join(path)))
-    else:
-        file_names = sorted(glob.glob(os.path.join(path, '*.txt')))
-    for i, file_name in enumerate(file_names):
-        with open(file_name, "r") as f:
-            label = f.read().splitlines()
-
-            pre_objs = np.genfromtxt(label, delimiter=' ',
-                                     names=['type', 'truncated', 'occluded', 'alpha', 'bbox_xmin', 'bbox_ymin',
-                                            'bbox_xmax', 'bbox_ymax', 'dimensions_1', 'dimensions_2',
-                                            'dimensions_3', 'location_1', 'location_2', 'location_3', 'rotation_y'],
-                                     dtype=None)
+def load_label(root_path):
+    with open(root_path, "r") as f:
+        label = f.read().splitlines()
+        pre_objs = np.genfromtxt(label, delimiter=' ',
+                                 names=['type', 'truncated', 'occluded', 'alpha', 'bbox_xmin',
+                                        'bbox_ymin',
+                                        'bbox_xmax', 'bbox_ymax', 'dimensions_1', 'dimensions_2',
+                                        'dimensions_3', 'location_1', 'location_2', 'location_3',
+                                        'rotation_y'],
+                                 dtype=None)
     return pre_objs
 
-
-def load_bin(root_path):
-    if root_path[-3:] == "bin":
-        file_names = sorted(glob.glob(os.path.join(root_path)))
-    else:
-        file_names = sorted(glob.glob(os.path.join(root_path, '*.bin')))
-
-    velodyne = dict()
-    # print(file_names)
-    num_files = len(file_names)
-    for i, file_name_lidar in enumerate(file_names):
-        file_num = file_name_lidar.split("/")[-1]
-        file_num = file_num.split(".")[0]
-        with open(file_name_lidar, 'rb') as f:
-            data = np.fromfile(f, np.float32)
-            ss = int(data.shape[0] / 4)
-            data = np.reshape(data[:ss * 4], (ss, 4))
-            velodyne[file_num] = data
-
-        uf.print_progress(f"-- Progress: {i}/{num_files}")
+def load_velo(filepath):
+    with open(filepath, 'rb') as f:
+        data = np.fromfile(f, np.float32)
+        ss = int(data.shape[0] / 4)
+        data = np.reshape(data[:ss * 4], (ss, 4))
+        velodyne = data
     return velodyne
 
 
-if __name__ == '__main__':
-    path = "/media/dolphin/intHDD/birdnet_data/bv_a2d2/"
-    a = load_txt(path)
+def load_kitti(velo_path, label_path, calib_path):
+    print(velo_path, label_path, calib_path)
+    velo_files = sorted(glob.glob(os.path.join(velo_path, '*.bin')))
+    label_flies = sorted(glob.glob(os.path.join(label_path, '*.txt')))
+    calib_files = sorted(glob.glob(os.path.join(calib_path, '*.txt')))
+    print(velo_files)
+    print(label_flies)
+    print(calib_files)
+    for velo_file, label_flie, calib_file in zip(velo_files, label_flies, calib_files):
+        file_num = velo_file.split('/')[-1].split('.')[0]
+        print(velo_file)
+        print(label_flie)
+        print(calib_file)
+        velo = load_velo(velo_file) # numpy
+        label = load_label(label_flie) # numpy
+        calib = read_calib_file(calib_file) # dict
+        print(file_num)
+        print(type(velo))
+        print(type(label))
+        print(type(calib))
+
