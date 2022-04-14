@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import pandas
 import open3d as o3d
+import cv2
 
 
 def print_progress(status_msg):
@@ -46,18 +47,6 @@ def get_box3d_corner(bbox_wlh):
     trr = np.asarray([-bbox_wlh[..., 0] / 2, -bbox_wlh[..., 1] / 2, +bbox_wlh[..., 2] / 2])
     return np.asarray([brl, bfl, bfr, brr, trl, tfl, tfr, trr])
 
-# def get_box3d_corner(bbox_hwl):
-#     brl = np.asarray([-bbox_hwl[..., 0] / 2, +bbox_hwl[..., 1] / 2, -bbox_hwl[..., 2] / 2])
-#     bfl = np.asarray([-bbox_hwl[..., 0] / 2, +bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     bfr = np.asarray([-bbox_hwl[..., 0] / 2, -bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     brr = np.asarray([-bbox_hwl[..., 0] / 2, -bbox_hwl[..., 1] / 2, -bbox_hwl[..., 2] / 2])
-#     trl = np.asarray([+bbox_hwl[..., 0] / 2, +bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     tfl = np.asarray([+bbox_hwl[..., 0] / 2, +bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     tfr = np.asarray([+bbox_hwl[..., 0] / 2, -bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     trr = np.asarray([+bbox_hwl[..., 0] / 2, -bbox_hwl[..., 1] / 2, +bbox_hwl[..., 2] / 2])
-#     return np.asarray([brl, bfl, bfr, brr, trl, tfl, tfr, trr])
-
-
 
 def create_rotation_matrix(euler):
     (yaw, pitch, roll) = euler
@@ -83,3 +72,23 @@ def create_rotation_matrix(euler):
     rotation_matrix = np.dot(yaw_matrix, pitch_matrix, roll_matrix)
 
     return rotation_matrix
+
+def draw_rotated_box(img, corners):
+    """
+    corners :
+    """
+    color = (255, 255, 255)
+    for idx, corner in enumerate(corners.values()):
+        corner = corner['p_corners']
+        if int(corner[1][0]) - int(corner[0][0]) == 0 and int(corner[1][1]) - int(corner[0][1]) == 0:
+            continue
+        corner_idxs = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6),
+                       (3, 7)]
+        for corner_idx in corner_idxs:
+            cv2.line(img,
+                     (int(corner[corner_idx[0]][0]),
+                      int(corner[corner_idx[0]][1])),
+                     (int(corner[corner_idx[1]][0]),
+                      int(corner[corner_idx[1]][1])),
+                     color, 2)
+    return img

@@ -1,16 +1,10 @@
-#!/home/dolphin/.pyenv/versions/paper/bin/python
-import sys
-import shutil
-import math
+#!/home/falcon/.pyenv/versions/paper/bin/python
 import numpy as np
 import os
 import glob
 import cv2
 import open3d as o3d
 import pandas as pd
-import scipy.interpolate as spi
-import matplotlib.pyplot as plt
-import copy
 import time
 
 import util.util_function as uf
@@ -18,60 +12,68 @@ import util.error_check as ec
 import util.load_and_save as ls
 import config as cfg
 
+import warnings
+
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
+
 
 class PreparationImage:
-    def __init__(self, root_path, show_view=False):
+    def __init__(self, show_view=False, cell_size=0.05, grid_shape=1000):
         self.velo_path = cfg.Paths.VELO_ROOT
         self.label_path = cfg.Paths.LABEL_ROOT
         self.calib_path = cfg.Paths.CALIB_ROOT
         self.show_view = show_view
+        self.cell_size = cell_size
+        self.grid_shape = grid_shape
+        self.limited_meter = cell_size * grid_shape
+
         # self.theta = theta
         # self.velodyne_points = ls.load_bin(self.velo_path)
         # self.img_labels = ls.load_txt(self.label_path)
         self.save_root = cfg.Paths.SAVE_DIR
         self.basic_plane = [-0.01958795, -0.00710267, 0.99978291, 1.755962]
 
-    def get_image(self, tbev_pose=np.pi / 3, cell_size=0.05, grid_shape=500):
-        """
-
-        :param tbev_pose: axis-y rotation angle
-        :param cell_size: grid cell size
-        :param grid_shape: image size / cell_size
-        :return:
-        """
-        # ls.load_kitti(self.velo_path,self.label_path,self.calib_path)
+    def make_dataset(self, tbev_pose=np.pi / 3):
         velo_files = sorted(glob.glob(os.path.join(self.velo_path, '*.bin')))
         label_flies = sorted(glob.glob(os.path.join(self.label_path, '*.txt')))
         calib_files = sorted(glob.glob(os.path.join(self.calib_path, '*.txt')))
         num = len(velo_files)
         count = 0
         for velo_file, label_flie, calib_file in zip(velo_files, label_flies, calib_files):
+            count += 1
+            start_time = time.time()
             file_num = velo_file.split('/')[-1].split('.')[0]
             velo = ls.load_velo(velo_file)  # numpy
             label = ls.load_label(label_flie)  # numpy
             calib = ls.read_calib_file(calib_file)  # dict
             self.get_calib(calib)
-            annotations = self.get_annotations(label, file_num)
-            start_time = time.time()
+            points = velo[:, :3]
+            plane_model = self.get_ground_plane(points)
+            annotation = self.get_annotations(label, plane_model, file_num)
+            if not bool(annotation[file_num]):
+                continue
 
             # image_param shape : (N,6) :[rotated_points(x,y,z), points_z, reflence, normal_theta]
-            image_param = self.get_image_param(velo, tbev_pose, cell_size, grid_shape)
-
+            image_param = self.get_image_param(velo, plane_model, tbev_pose)
 
             # pixels shape : (N,2)
-            flpixels = self.pixel_coordinates(image_param[:, :2], tbev_pose, cell_size, grid_shape)
+            flpixels = self.pixel_coordinates(image_param[:, :2], tbev_pose)
             # depthmap shape : (grid_shape, grid_shape, 3)
-            depthmap = self.interpolation(flpixels, image_param, grid_shape)
+            depthmap = self.interpolation(flpixels, image_param, 3, 6)
             normal_depthmap = uf.normalization(depthmap)
-
             deg = int(tbev_pose * (180 / np.pi))
-            save_dir = f"{self.save_root}/deg_{deg}"
-            os.makedirs(save_dir, exist_ok=True)
-            save_file = os.path.join(save_dir, f"{file_num}.jpg")
+            save_image_dir = f"{self.save_root}/{int(self.grid_shape * self.cell_size)}m/deg_{deg}/image"
+            save_label_dir = f"{self.save_root}/{int(self.grid_shape * self.cell_size)}m/deg_{deg}/label"
+            os.makedirs(save_image_dir, exist_ok=True)
+            os.makedirs(save_label_dir, exist_ok=True)
+            save_image_file = os.path.join(save_image_dir, f"{file_num}.jpg")
             result_depthmap = (normal_depthmap * 255).astype(np.uint8)
-            cv2.imwrite(save_file, result_depthmap)
+            cv2.imwrite(save_image_file, result_depthmap)
+            show_map = self.draw_rotated_box(result_depthmap, annotation[file_num])
+            save_label_img = os.path.join(save_label_dir, f"{file_num}.jpg")
+            cv2.imwrite(save_label_img, show_map)
+            ls.save_json(save_label_dir, annotation, file_num)
 
-            count += 1
             end_time = time.time()
             step_time = end_time - start_time
             full_time = step_time * (num - count)
@@ -90,19 +92,26 @@ class PreparationImage:
         self.R0 = np.reshape(self.R0, [3, 3])
         self.C2V = inverse_rigid_trans(self.V2C)
 
-    def get_annotations(self, labels, file_num):
-        ann_id = 0
+    def get_annotations(self, labels, plane_model, file_num):
+
+        box_id = 0
         if (labels.ndim < 1):
             labels = np.array(labels, ndmin=1)
-        annotations = []
+
+        categories = ['Car', 'Van', 'Truck', 'Pedestrian', 'Person_sitting', 'Cyclist', 'Tram', 'Misc', 'DontCare']
+        categories = [categories[idx] for idx in range(5)]
+        category_dict = {k: k for v, k in enumerate(categories)}
+        annotations = {file_num: dict()}
         for obj in labels:
-            print('obj', obj['type'])
-            if obj['type'] != 'DontCare':
+            t = obj['type']
+            if isinstance(t, (bytes, np.bytes_)):
+                t = t.decode("utf-8")
+            label = category_dict.get(t, 'DontCare')
+            if label != 5:
                 location = np.array([[obj['location_1'], obj['location_2'], obj['location_3']]])  # cam xyz
                 pts_3d_ref = np.transpose(np.dot(np.linalg.inv(self.R0), np.transpose(location)))
                 yaw = obj['rotation_y']
                 n = pts_3d_ref.shape[0]
-                print(n)
                 pts_3d_ref = np.hstack((pts_3d_ref, np.ones((n, 1))))
                 he = np.array([0, 0, 1.73 / 2]).reshape([1, 3])
                 centroid = np.dot(pts_3d_ref, np.transpose(self.C2V)) + he
@@ -110,31 +119,37 @@ class PreparationImage:
                 dimension = np.array([obj['dimensions_2'], obj['dimensions_3'], obj['dimensions_1']])  # wlh
                 corners = uf.get_box3d_corner(dimension)  # wlh
                 R = uf.create_rotation_matrix([yaw, 0, 0])
-                print(centroid)
-                rotated_corners = np.dot(corners, R) + centroid
-                rotated_corners = np.concatenate([rotated_corners, centroid], axis=0)
-                print(rotated_corners.shape)
-                # print(pv.shape)
-                ann = {}
-                ann['image_file'] = file_num
-                ann['ann_id'] = ann_id
-                ann['center'] = centroid
-                ann['dimension'] = dimension
-                ann_id += 1
-                ann['corners'] = rotated_corners
-                ann['category'] = obj['type']
-                ann['rotation_y'] = obj['rotation_y']
-                ann['alpha'] = obj['alpha']
+                corners = np.dot(corners, R) + centroid
+                corners = np.concatenate([corners, centroid], axis=0)
+                rotated_corners, normal_theta = self.get_rotation_and_normal_vector(corners, tbev_pose)
+                height = self.cal_height(centroid, plane_model) * 2
+                value_mask = (rotated_corners[:, 0] > 0) & (rotated_corners[:, 1] < self.limited_meter / 2) & (
+                        rotated_corners[:, 1] > -self.limited_meter / 2)
+                rotated_corners = rotated_corners[value_mask, :]
 
-                annotations.append(ann)
+                pixels = self.pixel_coordinates(rotated_corners[:, :2], tbev_pose)
+
+                imshape = [self.grid_shape, self.grid_shape, 3]
+                valid_mask = (pixels[:, 0] >= 0) & (pixels[:, 0] < imshape[1] - 1) & (pixels[:, 1] >= 0) & (
+                        pixels[:, 1] < imshape[0] - 1)
+                pixels = pixels[valid_mask, :]
+                if pixels.size < 18:
+                    continue
+                ann = dict()
+                ann[box_id] = {'file_num': file_num, 'centroid': centroid.tolist(), 'dimension': dimension.tolist(),
+                               'height': height.tolist(), 'corners': rotated_corners.tolist(),
+                               'p_corners': pixels.tolist(), 'category': label,
+                               'rotation_y': obj['rotation_y'], 'alpha': obj['alpha']}
+                box_id += 1
+                annotations[file_num].update(ann)
         return annotations
 
-    def get_image_param(self, value, tbev_pose, cell_size, grid_shape):
-        limited_meter = cell_size * grid_shape
+    def get_image_param(self, value, plane_model, tbev_pose):
         points = value[:, :3]
-        rotated_points, normal_theta, height = self.get_rotation_and_normal_vector(points, tbev_pose)
-        value_mask = (rotated_points[:, 0] > 0) & (rotated_points[:, 1] < limited_meter / 2) & (
-                rotated_points[:, 1] > -limited_meter / 2)
+        rotated_points, normal_theta = self.get_rotation_and_normal_vector(points, tbev_pose)
+        height = self.cal_height(points, plane_model)
+        value_mask = (rotated_points[:, 0] > 0) & (rotated_points[:, 1] < self.limited_meter / 2) & (
+                rotated_points[:, 1] > -self.limited_meter / 2)
         crop_points = rotated_points[value_mask, :]
         normal_theta = normal_theta[value_mask, :]
         height = height[value_mask, :]
@@ -155,18 +170,17 @@ class PreparationImage:
         """
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
-        height = self.get_ground_height(pcd, points)
         search_param = o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=20)
         pcd.estimate_normals(search_param)
         points_normals = np.asarray(pcd.normals)[:, 0:3:2]
         normal_theta = np.arctan2(points_normals[:, 1:], points_normals[:, 0:1])
         normal_theta = normal_theta % (2 * np.pi)
-        pcd.rotate(pcd.get_rotation_matrix_from_xyz((0, tbev_pose, 0)))
+        pcd.rotate(pcd.get_rotation_matrix_from_xyz((0, tbev_pose, 0)), center=(0, 0, 0))
         rotated_points = np.asarray(pcd.points)[:, :3]
 
-        return rotated_points, normal_theta, height
+        return rotated_points, normal_theta
 
-    def get_ground_height(self, pcd, points, plane_check=False):
+    def get_ground_plane(self, points, plane_check=False):
         points_vaild = (points[:, 2] < -1.0)  # & (points[:, 2] < -1.5)
         rote_pcd = o3d.geometry.PointCloud()
         rote_pcd.points = o3d.utility.Vector3dVector(points[points_vaild, :])
@@ -174,35 +188,33 @@ class PreparationImage:
         if plane_check:
             ec.plane_check(plane_model)
         plane_model = np.array(plane_model)
+        return plane_model
+
+    def cal_height(self, points, plane_model):
         height = np.abs(plane_model[0:1] * points[:, 0:1] + plane_model[1:2] * points[:, 1:2] +
                         plane_model[2:3] * points[:, 2:3] + plane_model[3:4]) / np.sum(np.power(plane_model, 2))
         return height
 
-    def pixel_coordinates(self, rotated_xy, tbev_pose, cell_size, grid_shape):
+    def pixel_coordinates(self, rotated_xy, tbev_pose):
         """
 
-        :param image_param: [rotated_points(x,y,z), height, reflence, normal_theta]
-        :param cell_size: (default : 0.05)
-        :param grid_shape: (default : 500)
+        :param rotated_xy: rotated_points(x,y)
+        :param tbev_pose: rotation_y(default : 0)
         :return:
         """
-        print((cell_size * np.cos(tbev_pose)))
-        image_x = (grid_shape / 2) - (rotated_xy[:, 1:2] / cell_size)
-        image_y = (grid_shape) - (rotated_xy[:, 0:1] / (cell_size * np.cos(tbev_pose)))
+        image_x = (self.grid_shape / 2) - (rotated_xy[:, 1:2] / self.cell_size)
+        image_y = (self.grid_shape) - (rotated_xy[:, 0:1] / (self.cell_size * np.cos(tbev_pose)))
         pixels = np.concatenate([image_x, image_y], axis=1)
         return pixels
 
-    def interpolation(self, pixels, points, grid_shape):
+    def interpolation(self, pixels, points, start_idx, end_idx):
         """
 
         :param pixels: (N,2) float
         :param points: (N,6) [rotated_points(x,y,z), height, reflence, normal_theta]
-        :param cell_size: default 0.05
-        :param grid_shape: default 500
         :return:
         """
-        start_time = time.time()
-        imshape = [grid_shape, grid_shape, 3]
+        imshape = [self.grid_shape, self.grid_shape, 3]
         valid_mask = (pixels[:, 0] >= 0) & (pixels[:, 0] < imshape[1] - 1) & (pixels[:, 1] >= 0) & (
                 pixels[:, 1] < imshape[0] - 1)
         pixels = pixels[valid_mask, :]
@@ -218,9 +230,7 @@ class PreparationImage:
         for quarter_col in quarter_columns:
             qtpixels = quart_pixels.loc[:, quarter_col]
             qtpixels = qtpixels.rename(columns={quarter_col[0]: 'col', quarter_col[1]: 'row'})
-            # diff = (1-abs(x-xn), 1-abs(y-yn)) [N, 2]
             diff = 1 - np.abs(flpixels - qtpixels.values)
-            # weights = (1-abs(x-xn)) * (1-abs(y-yn)) [N]
             weights = diff[:, 0] * diff[:, 1]
             weights = np.expand_dims(weights, axis=1)
             weights = np.tile(weights, 3)
@@ -232,16 +242,15 @@ class PreparationImage:
                 rows = step_pixels['row'].values
                 cols = step_pixels['col'].values
                 inds = step_pixels.index.values
-                depthmap[rows, cols, :] += points[inds, 3:6] * weights[inds, :]
+                depthmap[rows, cols, :] += points[inds, start_idx:end_idx] * weights[inds, :]
                 weightmap[rows, cols, :] += weights[inds, :]
                 qtpixels = qtpixels[~qtpixels.index.isin(step_pixels.index)]
 
         depthmap[depthmap > 0] = depthmap[depthmap > 0] / weightmap[depthmap > 0]
         depthmap[weightmap < 0.5] = 0
-        end_time = time.time()
-        # print('interpolation time', end_time - start_time)
-
         return depthmap
+
+
 
 
 def inverse_rigid_trans(Tr):
@@ -255,11 +264,10 @@ def inverse_rigid_trans(Tr):
 
 
 if __name__ == '__main__':
-    root_path = cfg.Paths.VELO_ROOT
-    cl = PreparationImage(root_path, show_view=False)
+    cl = PreparationImage(show_view=False)
     theta = np.arange(0, np.pi / 2, np.pi / 12)
-    for tbev_pose in theta[0:1]:
-        print('tbev_pose', tbev_pose)
-        cl.get_image(tbev_pose=tbev_pose)
+    for tbev_pose in theta:
+        print('\ntbev_pose', tbev_pose)
+        cl.make_dataset(tbev_pose=tbev_pose)
     # velodyne_points = ls.load_bin(root_path)
     # rotate_points(velodyne_points, pitch=0)
