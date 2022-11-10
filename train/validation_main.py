@@ -1,10 +1,11 @@
+import os
 import os.path as op
 import numpy as np
 import pandas as pd
 
 import settings
-import train.framework.train_util as tu
 import config_dir.util_config as uc
+import train.framework.train_util as tu
 import config as cfg
 from dataloader.framework.dataset_reader import DatasetReader
 from model.framework.model_factory import ModelFactory
@@ -37,15 +38,15 @@ def analyze_performance(dataset_name, loss_weights, weight_suffix, latest_epoch)
 
     dataset_val, val_steps, imshape, anchors_per_scale \
         = get_dataset(datapath, dataset_name, False, batch_size, "val", anchors)
-    feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, anchors_per_scale)
+    feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, imshape, anchors_per_scale)
 
     model = ModelFactory(batch_size, imshape, anchors_per_scale, training=None).get_model()
     model = try_load_weights(ckpt_path, model, weight_suffix)
     loss_object = IntegratedLoss(loss_weights, valid_category)
-    validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, anchors_per_scale, ckpt_path)
+    validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, ckpt_path)
 
     print(f"========== Start analyze_performance with {dataset_name} epoch: {weight_suffix} ==========")
-    validater.run_epoch(dataset_val, latest_epoch, True, True, val_only=True)
+    validater.run_epoch(dataset_val, None, latest_epoch, True, True, val_only=True)
 
 
 def get_dataset(datapath, dataset_name, shuffle, batch_size, split, anchors):

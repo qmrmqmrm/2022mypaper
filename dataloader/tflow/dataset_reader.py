@@ -67,7 +67,7 @@ class DatasetReader:
         print(f"[dataset] num epochs={self.epochs}, batch size={self.batch_size}")
         dataset = dataset.repeat(self.epochs)
         dataset = dataset.batch(batch_size=self.batch_size, drop_remainder=True)
-        return dataset
+        return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     def get_total_frames(self):
         return self.config["length"]
@@ -78,28 +78,27 @@ class DatasetReader:
 
 # ==================================================
 import numpy as np
-import dataloader.framework.data_util as tu
+import dataloader.data_util as tu
 
 
 def test_read_dataset():
     print("===== start test_read_dataset")
-    dataset = DatasetReader(op.join(cfg.Paths.DATAPATH, "kitti_train")).get_dataset()
+    dataset = DatasetReader(op.join(cfg.Paths.DATAPATH, "city_train")).get_dataset()
     for i, x in enumerate(dataset):
-
-        continue
+        # continue
         image = uf.to_uint8_image(x['image'])
         image = image[0].numpy()
         bboxes = x['bboxes'][0].numpy()
-        image = tu.draw_boxes(image, bboxes, cfg.Dataloader.MAJOR_CATE)
+        image = tu.draw_boxes(image, bboxes, cfg.Dataloader.CATEGORY_NAMES)
         cv2.imshow("image with boxes", image)
 
-        features = []
-        for feat_name in cfg.ModelOutput.FEATURE_ORDER:
-            feature = x[feat_name][0].numpy()
-            feature = feature[feature[..., 4] > 0]
-            features.append(feature)
-        feat_boxes = np.concatenate(features, axis=0)
-        # image = tu.draw_boxes(image, feat_boxes, cfg.Dataloader.MAJOR_CATE)
+        # features = []
+        # for feat_name in cfg.ModelOutput.FEATURE_ORDER:
+        #     feature = x[feat_name][0].numpy()
+        #     feature = feature[feature[..., 4] > 0]
+        #     features.append(feature)
+        # feat_boxes = np.concatenate(features, axis=0)
+        # image = tu.draw_boxes(image, feat_boxes, cfg.Dataloader.CATEGORY_NAMES)
         cv2.imshow("image with feature bboxes", image)
         key = cv2.waitKey()
         if key == ord('q'):
@@ -110,13 +109,12 @@ def test_read_dataset():
 
 def test_load_dataset():
     print("===== start test_read_dataset")
-    dataset = DatasetReader(op.join(cfg.Paths.DATAPATH, "uplus_train")).get_dataset()
+    dataset = DatasetReader(op.join(cfg.Paths.DATAPATH, "city_train")).get_dataset()
     for i, x in enumerate(dataset):
-        print(f"=== index: {i}, image={x['image'].shape}, bbox={x['bboxes'].shape}"
-              f", feature_l={x['feature_l'].shape}, feature_s={x['feature_s'].shape}")
+        print(f"=== index: {i}, image={x['image'].shape}, bbox={x['bboxes'].shape}")
         print("dontcare", x["dontcare"][0, :10])
 
 
 if __name__ == "__main__":
-    # test_read_dataset()
-    test_load_dataset()
+    test_read_dataset()
+    # test_load_dataset()

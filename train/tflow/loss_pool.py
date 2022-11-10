@@ -22,7 +22,7 @@ class CiouLoss(LossBase):
         :return: complete-iou loss (batch, HWA)
         """
         # object_mask: (batch, HWA, 1)
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         ciou_loss = self.compute_ciou(grtr["yxhw"][scale], pred["yxhw"][scale]) * object_mask[..., 0]
         # sum over object-containing grid cells
         scalar_loss = tf.reduce_sum(ciou_loss)
@@ -61,6 +61,9 @@ class CiouLoss(LossBase):
 
 
 class IouLoss(LossBase):
+    def __init__(self, use_l1=False):
+        self.use_l1 = use_l1
+
     def __call__(self, grtr, pred, auxi, scale):
         """
         :param grtr: GT feature map slices of some scale, {'yxhw': (batch, HWA, 4), 'object', ..., 'category', ...}
@@ -69,10 +72,14 @@ class IouLoss(LossBase):
         :return: complete-iou loss (batch, HWA)
         """
         # object_mask: (batch, HWA, 1)
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         iou_loss = self.compute_iou(grtr["yxhw"][scale], pred["yxhw"][scale]) * object_mask[..., 0]
         # sum over object-containing grid cells
         scalar_loss = tf.reduce_sum(iou_loss)
+        if self.use_l1:
+            scalar_l1, l1_loss = L1smooth()(grtr, pred, auxi, scale)
+            scalar_loss += scalar_l1
+            iou_loss += l1_loss
         return scalar_loss, iou_loss
 
     def compute_iou(self, grtr_yxhw, pred_yxhw):
@@ -85,7 +92,7 @@ class IouLoss(LossBase):
 
 class L1smooth(LossBase):
     def __call__(self, grtr, pred, auxi, scale):
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         # grtr_tlbr = uf.convert_box_format_yxhw_to_tlbr(grtr["yxhw"][scale]) * object_mask
         # pred_tlbr = uf.convert_box_format_yxhw_to_tlbr(pred["yxhw"][scale]) * object_mask
 
@@ -95,7 +102,7 @@ class L1smooth(LossBase):
         return scalar_loss, l1_loss
 
 
-class IouAware(LossBase):
+class IouAwareLoss(LossBase):
     def __call__(self, grtr, pred, auxi, scale):
         """
                 :param grtr: GT feature map slices of some scale, {'yxhw': (batch, HWA, 4), 'object', ..., 'category', ...}
@@ -104,13 +111,23 @@ class IouAware(LossBase):
                 :return: complete-iou loss (batch, HWA)
                 """
         # object_mask: (batch, HWA, 1)
-        pred_ioup = pred["ioup"]
-        object_mask = grtr["object"]
-        iou = uf.compute_iou_aligned(grtr["yxhw"], pred["yxhw"])[..., 0]
+        pred_ioup = pred["ioup"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
+        iou = uf.compute_iou_aligned(grtr["yxhw"][scale], pred["yxhw"][scale])[..., 0]
+        # gt_logit_iou = self.de_sigmoid(iou)
         iou_aware = tf.keras.losses.binary_crossentropy(iou, pred_ioup, label_smoothing=0.04) * object_mask[..., 0]
         # sum over object-containing grid cells
         scalar_loss = tf.reduce_sum(iou_aware)
         return scalar_loss, iou_aware
+
+    def de_sigmoid(self, x, eps=1e-7):
+        x = tf.maximum(x, eps)
+        x = tf.minimum(x, 1 / eps)
+        x = x / (1 - x)
+        x = tf.maximum(x, eps)
+        x = tf.minimum(x, 1 / eps)
+        x = tf.keras.backend.log(x)
+        return x
 
 
 class BoxObjectnessLoss(LossBase):
@@ -166,7 +183,7 @@ class MajorCategoryLoss(CategoryLoss):
         :param auxi: auxiliary data
         :return: category loss (batch, HWA, K)
         """
-        object_mask, valid_category = grtr["object"][scale], auxi["valid_category"]
+        object_mask, valid_category = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32), auxi["valid_category"]
         scalar_loss, category_loss = self.compute_category_loss(grtr["category"][scale], pred["category"][scale],
                                                                 object_mask * valid_category)
         return scalar_loss, category_loss
@@ -183,7 +200,7 @@ class MinorCategoryLoss(CategoryLoss):
         :param auxi: auxiliary data
         :return: category loss (batch, HWA, K)
         """
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         minor_ctgr_index = auxi[self.minor_ctgr]
         loss_mask = object_mask * tf.cast(grtr["category"][scale] == minor_ctgr_index, tf.float32)
         scalar_loss, category_loss = self.compute_category_loss(grtr["minor_ctgr"][scale], pred[self.minor_ctgr][scale],
@@ -203,7 +220,7 @@ class MinorSpeedCategoryLoss(CategoryLoss):
         :param auxi: auxiliary data
         :return: category loss (batch, HWA, K)
         """
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         speed_ctgr_index = auxi[self.speed_ctgr]
         loss_mask = object_mask * tf.cast(grtr["minor_ctgr"][scale] == speed_ctgr_index, tf.float32)
         scalar_loss, category_loss = self.compute_category_loss(grtr["speed_ctgr"][scale], pred[self.speed_ctgr][scale],
@@ -219,7 +236,7 @@ class DistanceLoss(LossBase):
         :param auxi: auxiliary data
         :return: distance loss (batch, HWA)
         """
-        object_mask = grtr["object"][scale]
+        object_mask = tf.cast(grtr["object"][scale] == 1, dtype=tf.float32)
         grtr_dist = grtr["distance"][scale] * object_mask      # (batch, HWA, 1)
 
         valid_dist_mask = tf.cast(grtr_dist > 0, dtype=tf.float32)
@@ -231,7 +248,7 @@ class DistanceLoss(LossBase):
         return scalar_loss, dist_loss
 
 
-class LaneParamLoss(LossBase):
+class FpointLoss(LossBase):
     def __call__(self, grtr, pred, auxi, scale):
         """
         :param grtr: GT lane feature map slices of some scale, {'angle': (batch, HWA, 1), 'intercept_x', ..., 'object': ..., 'category', ...}
@@ -239,20 +256,21 @@ class LaneParamLoss(LossBase):
         :param auxi: auxiliary data
         :return: parameter loss (batch, HWA)
         """
-        object_mask = grtr["object"]
-        grtr_angle, grtr_intercept_x = grtr["angle"], grtr["intercept_x"]
-        pred_angle, pred_intercept_x = pred["angle"], pred["intercept_x"]
+        object_mask = grtr["feat_lane"]["lane_centerness"][scale]
+        grtr_fpoints = grtr["feat_lane_logit"]["lane_fpoints"][scale]
+        pred_fpoints = pred["feat_lane_logit"]["lane_fpoints"][scale]
+        huber_loss = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.NONE)  # (batch, HWA)
+        l1_loss = huber_loss(grtr_fpoints, pred_fpoints) * object_mask[..., 0]
+        scalar_loss = tf.reduce_sum(l1_loss)
 
-        lane_angle_loss = (tf.abs(tf.sin(grtr_angle) - tf.sin(pred_angle))) * object_mask
-        lane_inter_loss = (tf.abs(grtr_intercept_x - pred_intercept_x)) * object_mask
-        lane_angle_loss_scalar = tf.reduce_sum(lane_angle_loss)
-        lane_inter_loss_scalar = tf.reduce_sum(lane_inter_loss)
-        scalar_loss = lane_angle_loss_scalar + lane_inter_loss_scalar
-        param_loss = (lane_angle_loss + lane_inter_loss)[..., 0]
-        return scalar_loss, param_loss
+        return scalar_loss, l1_loss
 
 
-class LaneObjectnessLoss(LossBase):
+class LanenessLoss(LossBase):
+    def __init__(self, pos_weight, neg_weight):
+        self.pos_weight = pos_weight
+        self.neg_weight = neg_weight
+
     def __call__(self, grtr, pred, auxi, scale):
         """
         :param grtr: GT feature map slices of some scale, {'yxhw': (batch, HWA, 4), 'object', ..., 'category', ...}
@@ -260,24 +278,42 @@ class LaneObjectnessLoss(LossBase):
         :param auxi: auxiliary data
         :return: objectness loss (batch, HWA)
         """
-        grtr_obj = grtr["object"][scale]
-        pred_obj = pred["object"][scale]
-        conf_focal = tf.pow(grtr_obj - pred_obj, 2)
-        obj_loss = tf.keras.losses.binary_crossentropy(grtr_obj, pred_obj, label_smoothing=0.04) * conf_focal[..., 0]
-        scalar_loss = tf.reduce_sum(obj_loss)
-        return scalar_loss, obj_loss
+        grtr_laneness = grtr["feat_lane"]["laneness"][scale]
+        pred_laneness = pred["feat_lane"]["laneness"][scale]
+        trainable_mask = tf.cast(tf.reduce_sum(grtr_laneness, axis=1) > 0, tf.float32)     # (b, 1)
+        conf_focal = tf.pow(grtr_laneness - pred_laneness, 2)
+        laneness_loss = tf.keras.losses.binary_crossentropy(grtr_laneness, pred_laneness, label_smoothing=0.04)\
+                   * conf_focal[..., 0] * trainable_mask
+        laneness_positive = laneness_loss * grtr_laneness[..., 0] * self.pos_weight
+        laneness_negative = laneness_loss * (1 - grtr_laneness[..., 0]) * self.neg_weight
+        scalar_loss = tf.reduce_sum(laneness_positive) + tf.reduce_sum(laneness_negative)
+        return scalar_loss, laneness_loss
+
+
+class CenternessLoss(LossBase):
+    def __init__(self, pos_weight, neg_weight):
+        self.pos_weight = pos_weight
+        self.neg_weight = neg_weight
+
+    def __call__(self, grtr, pred, auxi, scale):
+        grtr_centerness = grtr["feat_lane"]["lane_centerness"][scale]            # (b, hw, 1)
+        pred_centerness = pred["feat_lane"]["lane_centerness"][scale]
+        trainable_mask = tf.cast(tf.reduce_sum(grtr_centerness, axis=1) > 0, tf.float32)   # (b, 1)
+        ignore_mask = auxi["ignore_mask"]
+        conf_focal = tf.pow(grtr_centerness - pred_centerness, 2)
+        center_loss = tf.keras.losses.binary_crossentropy(grtr_centerness, pred_centerness, label_smoothing=0.04)   # (b, hw)
+        center_loss *= conf_focal[..., 0] * trainable_mask
+        center_positive = center_loss * grtr_centerness[..., 0] * self.pos_weight
+        center_negative = center_loss * (1 - grtr_centerness[..., 0]) * ignore_mask * self.neg_weight
+        scalar_loss = tf.reduce_sum(center_positive) + tf.reduce_sum(center_negative)
+        return scalar_loss, center_loss
 
 
 class LaneCategLoss(CategoryLoss):
     def __call__(self, grtr, pred, auxi, scale):
-        """
-        :param grtr: GT lane feature map slices of some scale, {'angle': (batch, HWA, 1), 'intercept_x', ..., 'object': ..., 'category', ...}
-        :param pred: pred. lane feature map slices of some scale, {'angle': (batch, HWA, 1), 'intercept_x', ..., 'object': ..., 'category', ...}
-        :param auxi: auxiliary data
-        :return: category loss (batch, HWA)
-        """
-        object_mask = grtr["object"][scale]
-        grtr_cate = grtr["category"][scale]    # (batch, HWA, 1)
-        pred_cate = pred["category"][scale]    # (batch, HWA, K)
-        scalar_loss, lane_ctgr_loss = self.compute_category_loss(grtr_cate, pred_cate, object_mask)
+
+        object_mask = tf.cast(grtr["feat_lane"]["lane_centerness"][scale] == 1, dtype=tf.float32)
+        scalar_loss, lane_ctgr_loss = self.compute_category_loss(grtr["feat_lane"]["lane_category"][scale],
+                                                                 pred["feat_lane"]["lane_category"][scale],
+                                                                 object_mask)
         return scalar_loss, lane_ctgr_loss

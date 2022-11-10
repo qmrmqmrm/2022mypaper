@@ -37,13 +37,12 @@ def train_by_plan(dataset_name, end_epoch, learning_rate, loss_weights, lr_hold)
 
     model, loss_object, optimizer = create_training_parts(batch_size, imshape, anchors_per_scale, ckpt_path,
                                                           learning_rate, loss_weights, valid_category)
-    feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, anchors_per_scale)
+    feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, imshape, anchors_per_scale)
     lrs = ts.Scheduler(learning_rate, cfg.Scheduler.CYCLE_STEPS, train_steps, ckpt_path,
                        warmup_epoch=cfg.Scheduler.WARMUP_EPOCH)
 
-    trainer = trainer_class(model, loss_object, augmenter, optimizer, train_steps, feature_creator,
-                            anchors_per_scale, strategy, ckpt_path)
-    validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, anchors_per_scale, ckpt_path)
+    trainer = trainer_class(model, loss_object, augmenter, optimizer, train_steps, feature_creator, strategy, ckpt_path)
+    validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, ckpt_path)
 
     for epoch in range(start_epoch, end_epoch):
         # dataset_train.shuffle(buffer_size=200)
@@ -99,6 +98,8 @@ def save_model_ckpt(ckpt_path, model, weights_suffix='latest'):
 
 def get_dataset(data_path, dataset_name, shuffle, batch_size, split, anchors):
     data_split_path = op.join(data_path, f"{dataset_name}_{split}")
+    if cfg.Train.MODE == "distribute" and split == "train":
+        batch_size = cfg.Train.DATSET_SIZE
     reader = DatasetReader(data_split_path, shuffle, batch_size, 1)
     dataset = reader.get_dataset()
     frames = reader.get_total_frames()

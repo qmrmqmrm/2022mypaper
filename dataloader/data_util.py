@@ -1,97 +1,11 @@
 import numpy as np
 import cv2
-import tensorflow as tf
 import pandas as pd
 
 import utils.framework.util_function as uf
 
 
-class TfrSerializer:
-    def __call__(self, raw_example):
-        features = self.convert_to_feature(raw_example)
-        # wrap the data as TensorFlow Features.
-        features = tf.train.Features(feature=features)
-        # wrap again as a TensorFlow Example.
-        tf_example = tf.train.Example(features=features)
-        # serialize the data.
-        serialized = tf_example.SerializeToString()
-        return serialized
-
-    def convert_to_feature(self, raw_example):
-        features = dict()
-        for key, value in raw_example.items():
-            if value is None:
-                continue
-            elif isinstance(value, np.ndarray):
-                # method 1: encode into raw bytes - fast but losing shape, 2 seconds to make training dataset
-                value = value.tobytes()
-                # method 2: encode into png format - slow but keeping shape, 10 seconds to make training dataset
-                # value = tf.io.encode_png(value)
-                # value = value.numpy()  # BytesList won't unpack a tf.string from an EagerTensor.
-                features[key] = self._bytes_feature(value)
-            elif isinstance(value, str):
-                value = bytes(value, 'utf-8')
-                features[key] = self._bytes_feature(value)
-            elif isinstance(value, int):
-                features[key] = self._int64_feature(value)
-            elif isinstance(value, float):
-                features[key] = self._float_feature(value)
-            else:
-                assert 0, f"[convert_to_feature] Wrong data type: {type(value)}"
-        return features
-
-    @staticmethod
-    def _bytes_feature(value):
-        """Returns a bytes_list from a string / byte."""
-        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
-    @staticmethod
-    def _float_feature(value):
-        """Returns a float_list from a float / double."""
-        return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
-
-    @staticmethod
-    def _int64_feature(value):
-        """Returns an int64_list from a bool / enum / int / uint."""
-        return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
-
-
-def inspect_properties(example):
-    config = dict()
-    for key, value in example.items():
-        if value is not None:
-            config[key] = read_data_config(key, value)
-    return config
-
-
-def read_data_config(key, value):
-    parse_type = ""
-    decode_type = ""
-    shape = ()
-    if isinstance(value, np.ndarray):
-        if value.dtype == np.uint8:
-            decode_type = "tf.uint8"
-        elif value.dtype == np.int32:
-            decode_type = "tf.int32"
-        elif value.dtype == np.float32:
-            decode_type = "tf.float32"
-        else:
-            assert 0, f"[read_data_config] Wrong numpy type: {value.dtype}, key={key}"
-        parse_type = "tf.string"
-        shape = list(value.shape)
-    elif isinstance(value, int):
-        parse_type = "tf.int64"
-        shape = None
-    elif isinstance(value, str):
-        parse_type = "tf.string"
-        shape = None
-    else:
-        assert 0, f"[read_data_config] Wrong type: {type(value)}, key={key}"
-
-    return {"parse_type": parse_type, "decode_type": decode_type, "shape": shape}
-
-
-def draw_boxes(image, bboxes, category_names, locations=None, box_format="yxhw"):
+def draw_boxes(image, bboxes, category_names, locations=None, box_format="yxhw", frame_name=None):
     """
     :param grid_feats:
     :param image: (height, width, 3), np.uint8
@@ -115,7 +29,6 @@ def draw_boxes(image, bboxes, category_names, locations=None, box_format="yxhw")
         speed_cat_index = int(bbox[-2])
         dist = bbox[-1]
         major_category = category_names["major"][major_cat_index]
-        # minor_category = category_names["minor"][minor_cat_index]
         image = cv2.rectangle(image, pt1, pt2, (255, 0, 0), thickness=2)
         if major_category == "Traffic sign":
             minor_category = category_names["sign"][minor_cat_index]
@@ -158,17 +71,19 @@ def check_locations_in_grid(locations, grid_ratio):
     return feat_location_pixs
 
 
-def draw_lanes(image, lanes, category_names):
-    lanes = lanes[lanes[:, 2] > 0]
-    lane_types = category_names["lane"]
-    upper_y, lower_y = image.shape[0] // 2, image.shape[0]
-    img_ratio = image.shape[1] / image.shape[0]
-    upper_xs = (lanes[..., 0] * img_ratio * upper_y + lanes[..., 1] * image.shape[1]).astype(int)
-    lower_xs = (lanes[..., 0] * img_ratio * lower_y + lanes[..., 1] * image.shape[1]).astype(int)
-    for upper_x, lower_x, lane in zip(upper_xs, lower_xs, lanes):
-        image = cv2.line(image, (upper_x, upper_y), (lower_x, lower_y), (255, 255, 0), 3)
-        image = cv2.putText(image, f"{lane_types[int(lane[3])]}", (upper_x, upper_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+def draw_lanes(image, lanes_point, lanes, category_names):
+    image = image.copy()
+    height, width = image.shape[:2]
+    for lane in lanes:
+        five_points = lane[:10].reshape(-1, 2) * np.array([height, width])
+        for i in range(five_points.shape[0]):
+            cv2.circle(image, (int(five_points[i, 1]), int(five_points[i, 0])), 1, (0, 255, 255), 6)
 
+    for lane_points in lanes_point:
+        lane_points = lane_points[lane_points[:, 0] > 0, :]
+        lane_points = lane_points * np.array([height, width])
+        for i in range(lane_points.shape[0]):
+            cv2.circle(image, (int(lane_points[i, 1]), int(lane_points[i, 0])), 1, (0, 0, 255), 6)
     return image
 
 

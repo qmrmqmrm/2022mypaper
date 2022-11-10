@@ -12,15 +12,54 @@ def save_config():
 
     dataset = meta.Datasets.TARGET_DATASET
     set_dataset_and_get_config(dataset)
-
     set_anchors()
-    space_count = 0
+    set_loss_combination()
+    set_log_columns()
+
     data = "meta."
+    space_count = 0
     write_file.write(f"import numpy as np\n")
     for i, line in enumerate(read_file):
         line = line.rstrip("\n")
         space_count, data = line_structure(line, write_file, space_count, data)
     write_file.close()
+
+
+def set_loss_combination():
+    new_plan = []
+    for period_plan in meta.Train.TRAINING_PLAN:
+        dataset, epochs, lr, loss_comb, save = period_plan
+        new_loss_comb = loss_comb["basic"]
+        if meta.ModelOutput.MINOR_CTGR:
+            new_loss_comb.update(loss_comb["minor"])
+        if meta.ModelOutput.SPEED_LIMIT:
+            new_loss_comb.update(loss_comb["speed"])
+        if meta.ModelOutput.LANE_DET:
+            new_loss_comb.update(loss_comb["lane"])
+        new_plan.append((dataset, epochs, lr, new_loss_comb, save))
+    meta.Train.TRAINING_PLAN = new_plan
+
+
+def set_log_columns():
+    columns = meta.Log.ExhaustiveLog.DETAIL
+    detail_columns = columns["base"]
+    if meta.ModelOutput.IOU_AWARE:
+        detail_columns += columns["aware"]
+    meta.Log.ExhaustiveLog.DETAIL = detail_columns
+
+    columns = meta.Log.ExhaustiveLog.COLUMNS_TO_MEAN
+    mean_columns = columns["base"]
+    if meta.ModelOutput.MINOR_CTGR:
+        mean_columns += columns["minor"]
+    if meta.ModelOutput.SPEED_LIMIT:
+        mean_columns += columns["speed"]
+    meta.Log.ExhaustiveLog.COLUMNS_TO_MEAN = mean_columns
+
+    columns = meta.Log.HistoryLog.SUMMARY
+    new_hislog_comb = columns["base"]
+    if meta.ModelOutput.LANE_DET:
+        new_hislog_comb += columns["lane"]
+    meta.Log.HistoryLog.SUMMARY = new_hislog_comb
 
 
 def line_structure(line, f, space_count=0, data=""):
@@ -97,28 +136,14 @@ def set_dataset_and_get_config(dataset):
     meta.Datasets.TARGET_DATASET = dataset
     dataset_cfg = getattr(meta.Datasets, dataset.capitalize())  # e.g. meta.Datasets.Uplus
     meta.Datasets.DATASET_CONFIG = dataset_cfg
-    print(meta.Datasets.DATASET_CONFIG)
-
-    if dataset == "uplus":
-        basic_anchor = params.Anchor.UPLUS_YOLOv4
-        anchor_resolution = np.array(params.Anchor.UPLUS_RESOLUTION, dtype=np.float32)
-        meta.Dataloader.ANCHORS_LANE = params.Anchor.UPLUS_LANE
-
-    elif dataset == "kitti" or dataset == "kittibev"  :
-        basic_anchor = params.Anchor.KITTI
-        anchor_resolution = np.array(params.Anchor.KITTI_RESOLUTION, dtype=np.float32)
-    else:
-        assert 0, f"{dataset} dataset is NOT expected"
-
-    input_resolution = np.array(dataset_cfg.INPUT_RESOLUTION, dtype=np.float32)
-    scale = np.min(input_resolution / anchor_resolution)
-    meta.Dataloader.ANCHORS_PIXEL = np.around(basic_anchor * scale, 1)
 
     return meta.Datasets.DATASET_CONFIG
 
 
 def set_anchors():
     anchor_mode = meta.AnchorGeneration.ANCHOR_STYLE
+    if anchor_mode == "Manual":
+        return None
     anchor_class = getattr(meta.AnchorGeneration, anchor_mode)
     anchor_option = dict()
     for item in dir(anchor_class):
@@ -126,8 +151,8 @@ def set_anchors():
             continue
         anchor_option[item.lower()] = getattr(anchor_class, item)
     anchor = anchor_generator(**anchor_option)
-    anchors = np.tile(anchor, (len(meta.ModelOutput.FEATURE_SCALES), 1))\
-        .reshape((len(meta.ModelOutput.FEATURE_SCALES), len(anchor), 2))
+    anchors = np.tile(anchor, (len(meta.ModelOutput.FEATURE_SCALES), 1)) \
+        .reshape((len(meta.ModelOutput.FEATURE_SCALES), len(anchor), len(anchor_option["base_anchor"])))
 
     scale_anchor = []
     for anchor, scale in zip(anchors, meta.AnchorGeneration.MUL_SCALES):
@@ -136,6 +161,7 @@ def set_anchors():
 
 
 def anchor_generator(aspect_ratio, base_anchor, scales):
+    assert len(base_anchor) == 2, "Check len base_anchor. base_anchor length must be 2."
     anchor_hws = []
     for scale in scales:
         anchor_hw = [

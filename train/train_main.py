@@ -1,6 +1,8 @@
 import settings
-from train.framework.train_plan import train_by_plan
+import os
 import numpy as np
+
+from train.framework.train_plan import train_by_plan
 import utils.framework.util_function as uf
 import config as cfg
 
@@ -14,5 +16,6 @@ def train_main():
 
 
 if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     np.set_printoptions(precision=4, suppress=True, linewidth=100)
     train_main()

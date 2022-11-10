@@ -1,9 +1,12 @@
+import time
+
 import numpy as np
 import os.path as op
 import pandas as pd
 import os
 
-from log.exhaustive_log import ExhaustiveLog
+from log.box_exhaustive_log import ExhaustiveBoxLog
+from log.lane_exhaustive_log import ExhaustiveLaneLog
 from log.history_log import HistoryLog
 from log.visual_log import VisualLog
 import utils.framework.util_function as uf
@@ -13,16 +16,19 @@ import config_dir.util_config as uc
 
 
 class Logger:
-    def __init__(self, visual_log, exhaustive_log, ckpt_path, epoch, is_train, val_only):
-        self.history_logger = HistoryLog()
-        self.exhaustive_logger = ExhaustiveLog() if exhaustive_log else None
+    def __init__(self, visual_log, exhaustive_log, loss_names, ckpt_path, epoch, is_train, val_only):
+        self.history_logger = HistoryLog(loss_names, is_train)
+        self.exhaustive_log = exhaustive_log
+        self.exhaustive_box_logger = ExhaustiveBoxLog(loss_names) if exhaustive_log else None
+        self.exhaustive_lane_logger = ExhaustiveLaneLog(loss_names) if exhaustive_log else None
         self.visual_logger = VisualLog(ckpt_path, epoch) if visual_log else None
         self.history_filename = op.join(ckpt_path, "history.csv")
-        self.exhaust_path = op.join(ckpt_path, "exhaust_log")
         self.num_channel = cfg.ModelOutput.NUM_MAIN_CHANNELS
+        self.exhaust_path = op.join(ckpt_path, "exhaust_log")
         if not op.isdir(self.exhaust_path):
             os.makedirs(self.exhaust_path, exist_ok=True)
-        self.nms = mu.NonMaximumSuppression()
+        self.nms_box = mu.NonMaximumSuppressionBox()
+        self.nms_lane = mu.NonMaximumSuppressionLane()
         self.is_train = is_train
         self.epoch = epoch
         self.ckpt_path = ckpt_path
@@ -32,56 +38,57 @@ class Logger:
         self.check_nan(grtr, "grtr")
         self.check_nan(pred, "pred")
         self.check_nan(loss_by_type, "loss")
-        grtr_slices = uf.merge_and_slice_features(grtr, True)
-        pred_slices = uf.merge_and_slice_features(pred, False)
-        nms_boxes = self.nms(pred_slices["feat"])
-        pred_slices["inst"]["bboxes"] = uf.slice_feature(nms_boxes, uc.get_bbox_composition(False))
+        nms_boxes = self.nms_box(pred["feat_box"])
+        inst_box = uf.slice_feature(nms_boxes, uc.get_bbox_composition(False))
+        inst_box = self.nms_box(inst_box, merged=True, is_inst=True)
+        pred["inst_box"] = uf.slice_feature(inst_box, uc.get_bbox_composition(False))
 
-        for key, feature_slices in grtr_slices.items():
-            grtr_slices[key] = uf.convert_tensor_to_numpy(feature_slices)
-        for key, feature_slices in pred_slices.items():
-            pred_slices[key] = uf.convert_tensor_to_numpy(feature_slices)
+        if cfg.ModelOutput.LANE_DET:
+            lane_hw = pred["feat_lane"]["whole"][0].shape[1:3]
+            nms_lanes = self.nms_lane(pred["feat_lane"], lane_hw)
+            pred["inst_lane"] = uf.slice_feature(nms_lanes, uc.get_lane_composition(False))
+
+        for key, feature_slices in grtr.items():
+            grtr[key] = uf.convert_tensor_to_numpy(feature_slices)
+        for key, feature_slices in pred.items():
+            pred[key] = uf.convert_tensor_to_numpy(feature_slices)
         loss_by_type = uf.convert_tensor_to_numpy(loss_by_type)
 
         if step == 0 and self.epoch == 0:
-            structures = {"grtr": grtr_slices, "pred": pred_slices, "loss": loss_by_type}
+            structures = {"grtr": grtr, "pred": pred, "loss": loss_by_type}
             self.save_model_structure(structures)
+        self.history_logger(step, grtr, pred, loss_by_type, total_loss)
 
-        self.history_logger(step, grtr_slices, pred_slices, loss_by_type, total_loss)
-        if self.exhaustive_logger:
-            self.exhaustive_logger(step, grtr_slices, pred_slices, loss_by_type, total_loss)
+        if self.exhaustive_log:
+            self.exhaustive_box_logger(step, grtr, pred, loss_by_type, total_loss)
+            if cfg.ModelOutput.LANE_DET:
+                self.exhaustive_lane_logger(step, grtr, pred, loss_by_type, total_loss)
         if self.visual_logger:
-            self.visual_logger(step, grtr_slices, pred_slices)
+            self.visual_logger(step, grtr, pred)
 
     def check_nan(self, features, feat_name):
         valid_result = True
-        for name, value in features.items():
-            if isinstance(value, dict):
-                for sub_name, tensor in value.items():
-                    if not np.isfinite(tensor.numpy()).all():
-                        print(f"nan {feat_name}:", sub_name, np.quantile(tensor.numpy(), np.linspace(0, 1, self.num_channel)))
-                        valid_result = False
-            elif isinstance(value, list):
-                for idx, tensor in enumerate(value):
-                    if tensor.ndim == 0 and (np.isnan(tensor) or np.isinf(tensor) or tensor > 100000000):
-                        print(f"nan loss: {name}, {value}")
-                        valid_result = False
-                    elif not np.isfinite(tensor.numpy()).all():
-                        print(f"nan {feat_name}: {idx} feat", np.quantile(tensor.numpy(), np.linspace(0, 1, self.num_channel)))
-                        valid_result = False
-            else:
-                if value.ndim == 0 and (np.isnan(value) or np.isinf(value) or value > 100000000):
-                    print(f"nan loss: {name}, {value}")
-                    valid_result = False
-                elif not np.isfinite(value.numpy()).all():
-                    print(f"nan {feat_name}:", name, np.quantile(value.numpy(), np.linspace(0, 1, self.num_channel)))
-                    valid_result = False
+        if isinstance(features, dict):
+            for name, value in features.items():
+                self.check_nan(value, f"{feat_name}_{name}")
+        elif isinstance(features, list):
+            for idx, tensor in enumerate(features):
+                self.check_nan(tensor, f"{feat_name}_{idx}")
+        else:
+            if features.ndim == 0 and (np.isnan(features) or np.isinf(features) or features > 100000000):
+                print(f"nan loss: {feat_name}, {features}")
+                valid_result = False
+            elif not np.isfinite(features.numpy()).all():
+                print(f"nan {feat_name}:", np.quantile(features.numpy(), np.linspace(0, 1, self.num_channel)))
+                valid_result = False
         assert valid_result
 
     def finalize(self, start):
         self.history_logger.finalize(start)
-        if self.exhaustive_logger:
-            self.save_exhaustive_log(start)
+        if self.exhaustive_log:
+            self.save_exhaustive_log(start, self.exhaustive_box_logger, "box")
+            if cfg.ModelOutput.LANE_DET:
+                self.save_exhaustive_log(start, self.exhaustive_lane_logger, "lane")
         if self.val_only:
             self.save_val_log()
         else:
@@ -109,13 +116,21 @@ class Logger:
         print("=== history\n", history_summary)
         history_summary.to_csv(self.history_filename, encoding='utf-8', index=False, float_format='%.4f')
 
-    def save_exhaustive_log(self, start):
-        self.exhaustive_logger.finalize(start)
-        exhaust_summary = self.exhaustive_logger.get_summary()
+    def save_exhaustive_log(self, start, exhaustive_logger, name):
+        exhaustive_logger.finalize(start)
+        exhaust_summary = exhaustive_logger.get_summary()
         if self.val_only:
-            exhaust_filename = self.exhaust_path + "/exhaust_val.csv"
+            exhaust_filename = self.exhaust_path + f"/exhaust_{name}_val.csv"
+            if cfg.ModelOutput.MINOR_CTGR and (name != "lane"):
+                sign_summary, mark_summary = exhaustive_logger.get_minor_summary()
+                sign_filename = self.exhaust_path + f"/sign_val.csv"
+                mark_filename = self.exhaust_path + f"/mark_val.csv"
+                sign_summary = pd.DataFrame(sign_summary)
+                mark_summary = pd.DataFrame(mark_summary)
+                sign_summary.to_csv(sign_filename, encoding='utf-8', index=False, float_format='%.4f')
+                mark_summary.to_csv(mark_filename, encoding='utf-8', index=False, float_format='%.4f')
         else:
-            exhaust_filename = self.exhaust_path + f"/epoch{self.epoch:02d}.csv"
+            exhaust_filename = self.exhaust_path + f"/{name}_epoch{self.epoch:02d}.csv"
         exhaust = pd.DataFrame(exhaust_summary)
         exhaust.to_csv(exhaust_filename, encoding='utf-8', index=False, float_format='%.4f')
 

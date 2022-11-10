@@ -3,39 +3,43 @@ import os.path as op
 import torch
 from torch import nn
 import torch.nn.functional as F
-import numpy as np
-import pandas as pd
 
-import config_dir.util_config as uc
-import config as cfg
+from utils.util_class import MyExceptionToCatch
 from dataloader.framework.dataset_reader import DatasetReader
+import model.framework.model_util as mu
 from model.framework.model_factory import ModelFactory
-from train.loss_factory import IntegratedLoss
-import train.framework.train_val as tv
-import train.framework.train_util as tu
-from train.feature_generator import FeatureMapDistributer
-from utils.snapshot_code import CodeSnapshot
 
+
+
+import train.framework.train_util as tu
+import config as cfg
+import config_dir.util_config as uc
 
 
 def train_by_plan(dataset_name, end_epoch, learning_rate, loss_weights, model_save):
-    batch_size, data_batch_size, anchors = cfg.Train.BATCH_SIZE, cfg.Train.DATA_BATCH_SIZE, cfg.AnchorGeneration.ANCHORS
-    data_path, ckpt_path = cfg.Paths.DATAPATH, op.join(cfg.Paths.CHECK_POINT, cfg.Train.CKPT_NAME)
-    valid_category, start_epoch = prepare_train(dataset_name, ckpt_path)
-
+    batch_size, data_batch_size, train_mode, anchors = cfg.Train.BATCH_SIZE, cfg.Train.DATA_BATCH_SIZE, cfg.Train.MODE, \
+                                                       cfg.AnchorGeneration.ANCHORS
+    datapath, ckpt_path = cfg.Paths.DATAPATH, op.join(cfg.Paths.CHECK_POINT, cfg.Train.CKPT_NAME)
+    valid_category = uc.get_valid_category_mask(dataset_name)
+    start_epoch = read_previous_epoch(ckpt_path)
+    train_batch_size = cfg.Train.GLOBAL_BATCH if train_mode == "distribute" else data_batch_size
+    val_batch_size = data_batch_size if train_mode == "distribute" else batch_size
     if end_epoch <= start_epoch:
         print(f"!! end_epoch {end_epoch} <= start_epoch {start_epoch}, no need to train")
         return
 
     dataset_train, train_steps, imshape, anchors_per_scale = \
-        get_dataset(data_path, dataset_name, True, data_batch_size, "train", anchors)
-    dataset_val, val_steps, _, _ = get_dataset(data_path, dataset_name, False, batch_size, "val", anchors)
+        get_dataset(datapath, dataset_name, True, train_batch_size, "train", anchors)
+    dataset_val, val_steps, _, _ = get_dataset(datapath, dataset_name, False, val_batch_size, "val", anchors)
 
-    model, loss_object, optimizer = create_training_parts(batch_size, imshape, anchors_per_scale, ckpt_path,
-                                                          learning_rate, loss_weights, valid_category)
-    feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, anchors_per_scale)
-    trainer = tv.ModelTrainer(model, loss_object, optimizer, train_steps, feature_creator,
-                            anchors_per_scale, ckpt_path)
+    model, loss_object, augmenter, optimizer, lrs, feature_creator = create_training_parts(batch_size, imshape,
+                                                                                           anchors_per_scale, ckpt_path,
+                                                                                           learning_rate, loss_weights,
+                                                                                           valid_category)
+    keras.utils.plot_model(model, to_file='resnet50.png', show_shapes=True, )
+    trainer_class = tv.ModelDistribTrainer if train_mode == "distribute" else tv.ModelTrainer
+    trainer = trainer_class(model, loss_object, augmenter, optimizer, lrs, train_steps, feature_creator,
+                            anchors_per_scale, stretagy, ckpt_path)
     validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, anchors_per_scale, ckpt_path)
 
     for epoch in range(start_epoch, end_epoch):
@@ -48,37 +52,13 @@ def train_by_plan(dataset_name, end_epoch, learning_rate, loss_weights, model_sa
         save_model_ckpt(ckpt_path, model, f"ep{end_epoch:02d}")
 
 
-def prepare_train(dataset_name, ckpt_path):
-    valid_category = uc.get_valid_category_mask(dataset_name)
-    start_epoch = read_previous_epoch(ckpt_path)
-    CodeSnapshot(ckpt_path, start_epoch)()
-    return valid_category, start_epoch
-
-
-def create_training_parts(batch_size, imshape, anchors_per_scale, ckpt_path, learning_rate,
-                          loss_weights, valid_category, weight_suffix='latest'):
-    model = ModelFactory(batch_size, imshape, anchors_per_scale).get_model()
-    model = try_load_weights(ckpt_path, model, weight_suffix)
-    loss_object = IntegratedLoss(loss_weights, valid_category)
-    optimizer = build_optimizer(model, learning_rate)
-    return model, loss_object, optimizer
-
-
-def save_model_ckpt(ckpt_path, model, weights_suffix='latest'):
-    ckpt_file = op.join(ckpt_path, f"model_{weights_suffix}.h5")
-    if not op.isdir(ckpt_path):
-        os.makedirs(ckpt_path, exist_ok=True)
-    print("=== save model:", ckpt_file)
-    model.save_weights(ckpt_file)
-    # model.save('./my_model')
-
-
 def get_dataset(datapath, dataset_name, shuffle, batch_size, split, anchors):
-    # data_split_path = op.join(datapath, f"{dataset_name}_{split}")
-    reader = DatasetReader(dataset_name, datapath, split, shuffle, batch_size, 1)
+    data_split_path = op.join(datapath, f"{dataset_name}_{split}")
+    reader = DatasetReader(data_split_path, shuffle, batch_size, 1)
     dataset = reader.get_dataset()
     frames = reader.get_total_frames()
-    image_shape = cfg.Datasets.DATASET_CONFIG.INPUT_RESOLUTION
+    dataset_cfg = reader.get_dataset_config()  # TODO
+    image_shape = dataset_cfg["image"]["shape"]
     # anchor sizes per scale in pixel
     anchors_per_scale = np.array([anchor / np.array([image_shape[:2]]) for anchor in anchors], dtype=np.float32)
     print(f"[get_dataset] dataset={dataset_name}, image shape={image_shape}, "
@@ -87,7 +67,7 @@ def get_dataset(datapath, dataset_name, shuffle, batch_size, split, anchors):
 
 
 def try_load_weights(ckpt_path, model, weights_suffix='latest'):
-    ckpt_file = op.join(ckpt_path, f"model_{weights_suffix}.pt")
+    ckpt_file = op.join(ckpt_path, f"model_{weights_suffix}.h5")
     if op.isfile(ckpt_file):
         print(f"===== Load weights from checkpoint: {ckpt_file}")
         model = tu.load_weights(model, ckpt_file)  # TODO
@@ -112,24 +92,3 @@ def read_previous_epoch(ckpt_path):
     else:
         print(f"[read_previous_epoch] NO history in {filename}")
         return 0
-
-
-def build_optimizer(model: torch.nn.Module, learning_rate) -> torch.optim.Optimizer:
-    """
-    Build an optimizer from config.
-    """
-    params = [{"params": [], "lr": 0, "weight_decay": 0}]
-    for key, value in model.named_parameters():
-        if not value.requires_grad:
-            continue
-        lr = learning_rate
-        weight_decay = cfg.Optimizer.WEIGHT_DECAY
-        if key.endswith("norm.weight") or key.endswith("norm.bias"):
-            weight_decay = cfg.Optimizer.WEIGHT_DECAY_NORM
-        elif key.endswith(".bias"):
-            lr = learning_rate
-            weight_decay = cfg.Optimizer.WEIGHT_DECAY_BIAS
-        params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
-
-    optimizer = torch.optim.SGD(model.parameters(), learning_rate, momentum=cfg.Optimizer.MOMENTUM)
-    return optimizer

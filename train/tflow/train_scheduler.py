@@ -1,10 +1,7 @@
-import numpy as np
 import os.path as op
 import pandas as pd
 import tensorflow as tf
 import matplotlib.pyplot as plt
-
-import config as cfg
 
 
 class Scheduler:
@@ -47,6 +44,8 @@ class Scheduler:
     def __call__(self, step):
         global_step = (self.cur_epoch - self.warmup_epoch) * self.epoch_steps + step
         lr = self.lr_scheduler(global_step)
+        if isinstance(lr, tf.Tensor):
+            lr = lr.numpy()
         lr_value = {"lr": lr}
         self.lr_log = self.lr_log.append(lr_value, ignore_index=True)
         return lr

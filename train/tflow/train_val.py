@@ -1,19 +1,21 @@
+import time
+import cv2
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import backend
 from timeit import default_timer as timer
 
 import config as cfg
-import train.tflow.train_scheduler
 import utils.framework.util_function as uf
 from train.framework.train_util import mode_decor
 import train.framework.train_util as tu
 from log.logger import Logger
 
+from log.visual_log import VisualLog
+import dataloader.data_util as du
+
 
 class TrainValBase:
-    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, anchors_per_scale,
-                 ckpt_path):
+    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, ckpt_path):
         self.model = model
         self.loss_object = loss_object
         self.augmenter = augmenter
@@ -22,32 +24,30 @@ class TrainValBase:
         self.ckpt_path = ckpt_path
         self.is_train = True
         self.feat_scales = cfg.ModelOutput.FEATURE_SCALES
-        self.anchor_ratio = np.concatenate([anchor for anchor in anchors_per_scale])
         self.feature_creator = feature_creator
+        self.batch_size = cfg.Train.BATCH_SIZE
 
     def run_epoch(self, dataset, scheduler, epoch=0, visual_log=False, exhaustive_log=False, val_only=False):
-        logger = Logger(visual_log, exhaustive_log, self.ckpt_path, epoch, self.is_train, val_only)
+        logger = Logger(visual_log, exhaustive_log, self.loss_object.loss_names, self.ckpt_path, epoch, self.is_train, val_only)
         epoch_start = timer()
         for step, features in enumerate(dataset):
             start = timer()
             if self.is_train:
                 self.optimizer.lr = scheduler(step)
-
             prediction, total_loss, loss_by_type, new_features = self.run_batch(features)
             logger.log_batch_result(step, new_features, prediction, total_loss, loss_by_type)
-            uf.print_progress(f"training {step}/{self.epoch_steps} steps, "
-                              f"time={timer() - start:.3f}, "
-                              f"total={total_loss:.3f}, "
-                              f"box={loss_by_type['ciou']:.3f}, "
-                              f"object={loss_by_type['object']:.3f}, "
-                              f"distance={loss_by_type['distance']:.3f}, "
-                              f"category={loss_by_type['category']:.3f}, ")
+            print_loss = f"training {step}/{self.epoch_steps} steps, " + f"time={timer() - start:.3f}, " + f"total={total_loss:.3f}, "
+            for key in loss_by_type.keys():
+                if "map" not in key:
+                    print_loss = print_loss + f"{key}={loss_by_type[key]:.3f}, "
+            uf.print_progress(print_loss)
 
             if step >= self.epoch_steps:
                 break
-            # if step >= 9:
+            # if step >= 10:
             #     break
 
+        print("")
         logger.finalize(epoch_start)
         if self.is_train and cfg.Scheduler.LOG:
             scheduler.save_log()
@@ -57,20 +57,13 @@ class TrainValBase:
 
 
 class ModelTrainer(TrainValBase):
-    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, anchors_per_scale,
-                 strategy, ckpt_path):
-        super().__init__(model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, anchors_per_scale,
-                         ckpt_path)
+    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, strategy, ckpt_path):
+        super().__init__(model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, ckpt_path)
 
     def run_batch(self, features):
-        features["feat"] = []
         if self.augmenter:
             features = self.augmenter(features)
-        for i in range(features["image"].shape[0]):
-            feat_sizes = [np.array(features["image"][i].shape[:2]) // scale for scale in self.feat_scales]
-            featmap = self.feature_creator.create(features["bboxes"][i].numpy(), feat_sizes)
-            features["feat"] = tu.create_batch_featmap(features, featmap)
-        features = tu.gt_feat_rename(features)
+        features = self.feature_creator(features)
 
         return self.run_step(features)
 
@@ -79,21 +72,18 @@ class ModelTrainer(TrainValBase):
         with tf.GradientTape() as tape:
             prediction = self.model(features["image"], training=True)
             total_loss, loss_by_type = self.loss_object(features, prediction)
-
         grads = tape.gradient(total_loss, self.model.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
         return prediction, total_loss, loss_by_type, features
 
 
 class ModelDistribTrainer(ModelTrainer):
-    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, anchors_per_scale,
-                 strategy, ckpt_path):
-        super().__init__(model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, anchors_per_scale,
-                         strategy, ckpt_path)
+    def __init__(self, model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, strategy, ckpt_path):
+        super().__init__(model, loss_object, augmenter, optimizer, epoch_steps, feature_creator, strategy, ckpt_path)
         self.strategy = strategy
 
     def run_epoch(self, dataset, scheduler, epoch=0, visual_log=False, exhaustive_log=False, val_only=False):
-        logger = Logger(visual_log, exhaustive_log, self.ckpt_path, epoch, self.is_train, val_only)
+        logger = Logger(visual_log, exhaustive_log, self.loss_object.loss_names, self.ckpt_path, epoch, self.is_train, val_only)
         epoch_start = timer()
         for step, features in enumerate(dataset):
             start = timer()
@@ -103,22 +93,19 @@ class ModelDistribTrainer(ModelTrainer):
 
             if self.augmenter:
                 features = self.augmenter(features)
-            for i in range(features["image"].shape[0]):
-                feat_sizes = [np.array(features["image"][i].shape[:2]) // scale for scale in self.feat_scales]
-                featmap = self.feature_creator.create(features["bboxes"][i].numpy(), feat_sizes)
-                features["feat"] = tu.create_batch_featmap(features, featmap)
+            features = self.feature_creator(features)
 
             replica_dataset = self.create_dataset(features)
-            for replica_feat in replica_dataset:
-                replica_feat["feat"] = [replica_feat.pop(key) for key in list(replica_feat.keys()) if
-                                        key.startswith("feat")]
-                replica_feat = tu.gt_feat_rename(replica_feat)
+            feat_keys = [key for key in features.keys() if key.startswith("feat")]
+            for rep_step, replica_feat in enumerate(replica_dataset):
+                for key in feat_keys:
+                    replica_feat[key] = self.dict_to_list(replica_feat[key])
                 prediction, total_loss, loss_by_type, new_features = self.run_batch(replica_feat)
                 logger.log_batch_result(step, new_features, prediction, total_loss, loss_by_type)
-                uf.print_progress(f"training {step}/{self.epoch_steps} steps, "
+                uf.print_progress(f"training {step}/{rep_step}/{self.epoch_steps} steps, "
                                   f"time={timer() - start:.3f}, "
                                   f"total={total_loss:.3f}, "
-                                  f"box={loss_by_type['ciou']:.3f}, "
+                                  f"box={loss_by_type['iou']:.3f}, "
                                   f"object={loss_by_type['object']:.3f}, "
                                   f"distance={loss_by_type['distance']:.3f}, "
                                   f"category={loss_by_type['category']:.3f}")
@@ -128,7 +115,6 @@ class ModelDistribTrainer(ModelTrainer):
             # if step > 10:
             #     break
 
-        print("")
         logger.finalize(epoch_start)
         if self.is_train and cfg.Scheduler.LOG:
             scheduler.save_log()
@@ -172,29 +158,41 @@ class ModelDistribTrainer(ModelTrainer):
             new_feat = tf.concat(self.strategy.experimental_local_results(value), 0)
         return new_feat
 
-    def create_dataset(self, feature_set):
-        feat_dict = {f"feat_{i}": v for i, v in enumerate(feature_set["feat"])}
-        feature_set = tf.data.Dataset.from_tensors(({"image": feature_set["image"], "bboxes": feature_set["bboxes"],
-                                                     "dontcare": feature_set["dontcare"], **feat_dict}))
+    def create_dataset(self, dataset):
+        dataset = self.list_to_dict(dataset)
+        dataset = tf.data.Dataset.from_tensor_slices(dataset)
+        dataset = dataset.batch(self.batch_size)
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.FILE
-        feature_set = feature_set.with_options(options)
-        replica_dataset = self.strategy.experimental_distribute_dataset(feature_set)
+        dataset = dataset.with_options(options)
+        replica_dataset = self.strategy.experimental_distribute_dataset(dataset)
         return replica_dataset
+
+    def list_to_dict(self, feature):
+        if isinstance(feature, dict):
+            for key, value in feature.items():
+                feature[key] = self.list_to_dict(value)
+        elif isinstance(feature, list):
+            return {f"list{i}": feat for i, feat in enumerate(feature)}
+        return feature
+
+    def dict_to_list(self, feature):
+        if isinstance(feature, dict):
+            for key, value in feature.items():
+                if key.startswith("list"):
+                    return [feature.pop(key) for key in list(feature.keys())]
+                else:
+                    feature[key] = self.dict_to_list(value)
+        return feature
 
 
 class ModelValidater(TrainValBase):
-    def __init__(self, model, loss_object, epoch_steps, feature_creator, anchors_per_scale, ckpt_path):
-        super().__init__(model, loss_object, None, None, epoch_steps, feature_creator, anchors_per_scale,
-                         ckpt_path)
+    def __init__(self, model, loss_object, epoch_steps, feature_creator, ckpt_path):
+        super().__init__(model, loss_object, None, None, epoch_steps, feature_creator, ckpt_path)
         self.is_train = False
 
     def run_batch(self, features):
-        for i in range(features["image"].shape[0]):
-            feat_sizes = [np.array(features["image"][i].shape[:2]) // scale for scale in self.feat_scales]
-            featmap = self.feature_creator.create(features["bboxes"][i].numpy(), feat_sizes)
-            features["feat"] = tu.create_batch_featmap(features, featmap)
-        features = tu.gt_feat_rename(features)
+        features = self.feature_creator(features)
         return self.run_step(features)
 
     @mode_decor

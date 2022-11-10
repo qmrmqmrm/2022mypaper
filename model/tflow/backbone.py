@@ -5,7 +5,7 @@ from tensorflow.keras.applications.efficientnet import *
 from utils.util_class import MyExceptionToCatch
 import model.framework.model_util as mu
 from model.framework.drop_block import DropBlock2D
-from model.framework.deformable_convolution import DCNv2
+from model.framework.deformable_conv_v2.deformable_layer import DeformableConv2D
 import config as cfg
 
 
@@ -47,7 +47,7 @@ class Darknet53(BackboneBase):
         conv'n' represents a feature map of which resolution is (input resolution / 2^n)
         e.g. input_tensor.shape[:2] == conv0.shape[:2], conv0.shape[:2]/8 == conv3.shape[:2]
         """
-        features = dict()
+        features = list()
         conv0 = self.conv2d(input_tensor, 32)
         conv1 = self.conv2d_s2(conv0, 64)
         conv1 = self.residual(conv1, 64)
@@ -59,17 +59,20 @@ class Darknet53(BackboneBase):
         conv3 = self.conv2d_s2(conv2, 256)
         for i in range(8):
             conv3 = self.residual(conv3, 256)
-        features["backbone_s"] = conv3
+        # feature small
+        features.append(conv3)
 
         conv4 = self.conv2d_s2(conv3, 512)
         for i in range(8):
             conv4 = self.residual(conv4, 512)
-        features["backbone_m"] = conv4
+        # feature medium
+        features.append(conv4)
 
         conv5 = self.conv2d_s2(conv4, 1024)
         for i in range(4):
             conv5 = self.residual(conv5, 1024)
-        features["backbone_l"] = conv5
+        # feature large
+        features.append(conv5)
 
         return features
 
@@ -80,14 +83,17 @@ class CSPDarkNet53(BackboneBase):
         self.training = training
 
     def __call__(self, input_tensor):
+        features = list()
         conv = self.conv2d(input_tensor, 32)
+        # conv = self.conv2d(input_tensor["image"], 32)
         conv = self.csp_block(conv, 64, 1, allow_narrow=False, training=self.training)
         conv = self.csp_block(conv, 128, 2, training=self.training)
         route_small = self.csp_block(conv, 256, 8, training=self.training)
+        features.append(route_small)
         route_medium = self.csp_block(route_small, 512, 8, training=self.training)
+        features.append(route_medium)
         route_large = self.csp_block(route_medium, 1024, 4, training=self.training)
-
-        features = {'feature_l': route_large, 'feature_m': route_medium, 'feature_s': route_small}
+        features.append(route_large)
         return features
 
     def csp_block(self, inputs, filters, num_blocks, allow_narrow=True, training=True):
@@ -107,15 +113,16 @@ class CSPDarkNet53(BackboneBase):
         shortcut = self.conv2d_k1(x, filters=half_filters)
         mainstream = self.conv2d_k1(x, filters=half_filters)
         for i in range(num_blocks):
-            mainstream = self.csp_res(mainstream, half_filters, training)
-        mainstream = self.conv2d(mainstream, half_filters)
+            mainstream = self.csp_res(mainstream, half_filters, training, allow_narrow)
+        mainstream = self.conv2d_k1(mainstream, half_filters)
         x = tf.concat([mainstream, shortcut], axis=-1)
         x = self.conv2d_k1(x, filters)
         return x
 
-    def csp_res(self, inputs, filters, training):
+    def csp_res(self, inputs, filters, training, first):
         dropblock = DropBlock2D(keep_prob=0.9, block_size=3)
-        x = self.conv2d_k1(inputs, filters)
+        half_filters = filters if first else filters // 2
+        x = self.conv2d_k1(inputs, half_filters)
         x = self.conv2d(x, filters)
         x = dropblock(x, training=training)
         residual_out = inputs + x
@@ -133,13 +140,14 @@ class ResNet(BackboneBase):
         self.conv2d_k1s2na = mu.CustomConv2D(kernel_size=1, strides=2, activation=False)
         self.conv2d_k1na = mu.CustomConv2D(kernel_size=1, activation=False)
         self.conv2d_k3s2na = mu.CustomConv2D(kernel_size=3, strides=2, activation=False)
-        self.dcn512 = DCNv2(512, 512, 3, padding=1)
+        self.dcn = mu.CustomDeformConv2D(scope="back")
         self.act = layers.ReLU()
 
     def __call__(self, input_tensor):
         conv = self.stem(input_tensor)
-        features = []
         res_conv = conv
+        features = list()
+        layer_features = list()
 
         for layer_num, block_num in enumerate(self.block_nums):
             filters = [self.chennels[layer_num], self.chennels[layer_num + 2]]
@@ -148,9 +156,11 @@ class ResNet(BackboneBase):
             for num in range(block_num):
                 first_conv = True if num == 0 else False
                 res_conv = self.bottleneck(res_conv, filters, dcn=dcn, first_conv=first_conv, first_layer=first_layer)
-            features.append(res_conv)
+            layer_features.append(res_conv)
 
-        features = {'feature_l': features[3], 'feature_m': features[2], 'feature_s': features[1]}
+        features.append(layer_features[1])
+        features.append(layer_features[2])
+        features.append(layer_features[3])
         return features
 
     def stem(self, inputs):
@@ -174,7 +184,7 @@ class ResNet(BackboneBase):
             shortcut = inputs
 
         if dcn:
-            x = self.dcn512(x)
+            x = self.dcn(x, 512)
         else:
             x = self.conv2d(x, filter1)
         x = self.conv2d_k1na(x, filter2)
@@ -192,8 +202,9 @@ class ResNetVD(ResNet):
 
     def __call__(self, input_tensor):
         conv = self.stem(input_tensor)
-        features = []
         res_conv = conv
+        features = list()
+        layer_features = list()
 
         for layer_num, block_num in enumerate(self.block_nums):
             filters = [self.chennels[layer_num], self.chennels[layer_num + 2]]
@@ -202,9 +213,12 @@ class ResNetVD(ResNet):
             for num in range(block_num):
                 first_conv = True if num == 0 else False
                 res_conv = self.bottleneck(res_conv, filters, dcn=dcn, first_conv=first_conv, first_layer=first_layer)
-            features.append(res_conv)
+            layer_features.append(res_conv)
 
-        features = {'feature_l': features[3], 'feature_m': features[2], 'feature_s': features[1]}
+        # feature small, medium, large
+        features.append(layer_features[1])
+        features.append(layer_features[2])
+        features.append(layer_features[3])
         return features
 
     def stem(self, inputs):
@@ -229,7 +243,7 @@ class ResNetVD(ResNet):
             shortcut = inputs
 
         if dcn:
-            x = self.dcn512(x)
+            x = self.dcn(x, 512)
         else:
             x = self.conv2d(x, filter1)
         x = self.conv2d_k1na(x, filter2)
@@ -247,9 +261,12 @@ class Efficientnet(BackboneBase):
         self.architecture = eval(cfg.Architecture.Efficientnet.NAME)
 
     def __call__(self, input_tensor):
+        features = list()
         efficient = self.architecture(False, weights=None, input_tensor=input_tensor, )
         feature_s = efficient.get_layer("block4a_expand_conv").input
+        features.append(feature_s)
         feature_m = efficient.get_layer("block6a_expand_conv").input
+        features.append(feature_m)
         feature_l = efficient.get_layer("top_conv").input
-        features = {'feature_l': feature_l, 'feature_m': feature_m, 'feature_s': feature_s}
+        features.append(feature_l)
         return features

@@ -7,8 +7,7 @@ import json
 import cv2
 
 from dataloader.readers.reader_base import DatasetReaderBase, DriveManagerBase
-import dataloader.framework.data_util as tu
-from dataloader.framework.data_util import depth_map_to_point_cloud, point_cloud_to_depth_map
+from dataloader.data_util import depth_map_to_point_cloud, point_cloud_to_depth_map
 
 
 class A2D2DriveManager(DriveManagerBase):
@@ -67,7 +66,7 @@ class A2D2Reader(DatasetReaderBase):
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         return image
 
-    def get_2d_box(self, index, raw_hw_shape=None):
+    def get_bboxes(self, index, raw_hw_shape=None):
         """
         :return: bounding boxes in 'yxhw' format
         """
@@ -88,7 +87,7 @@ class A2D2Reader(DatasetReaderBase):
         return resize_seg_img
 
     def seg_rescale(self, seg_image, scale):
-        crop = cv2.resize(seg_image, (seg_image.shape[1]//scale, seg_image.shape[0]//scale),
+        crop = cv2.resize(seg_image, (seg_image.shape[1] // scale, seg_image.shape[0] // scale),
                           interpolation=cv2.INTER_NEAREST)
         return crop
 
@@ -112,15 +111,24 @@ class A2D2Reader(DatasetReaderBase):
                         bbox_tlbr = (ltwh[1], ltwh[0], ltwh[1] + ltwh[3], ltwh[0] + ltwh[2])
                         bbox_yxhw = self.convert_to_bbox_format(bbox_tlbr)
                         if dict_name not in self.dataset_cfg.CATEGORIES_TO_USE:
-                            return None
-                        category_index = self.dataset_cfg.CATEGORIES_TO_USE.index(dict_name)
+                            dict_name = None
+                        # category_index = self.dataset_cfg.CATEGORIES_TO_USE.index(dict_name)
+                        if dict_name in self.dataset_cfg.CATEGORY_REMAP:
+                            dict_name = self.dataset_cfg.CATEGORY_REMAP[dict_name]
+                        category_index = dict_name
                         depth_patch = depth_map[int(bbox_tlbr[0]):int(bbox_tlbr[2]),
-                                         int(bbox_tlbr[1]):int(bbox_tlbr[3])]
+                                      int(bbox_tlbr[1]):int(bbox_tlbr[3])]
                         dist_value = self.get_depth_value(depth_patch)
                         categories.append(category_index)
                         bbox_yxhw += [1, dist_value]
                         bboxes.append(bbox_yxhw)
-        return np.asarray(bboxes, dtype=np.float32), np.asarray(categories, dtype=np.float32)
+        # return np.asarray(bboxes, dtype=np.float32), np.asarray(categories, dtype=np.float32)
+        if len(categories) < 1:
+            category_index = 0
+            categories.append(category_index)
+            bbox_yxhw = [0, 0, 0, 0, 0, 0]
+            bboxes.append(bbox_yxhw)
+        return np.asarray(bboxes, dtype=np.float32), categories
 
     def convert_to_bbox_format(self, tlbr):
         scale = self.dataset_cfg.SEGMAP_SCALE
@@ -128,7 +136,7 @@ class A2D2Reader(DatasetReaderBase):
         width = tlbr[3] - tlbr[1]
         center_y = tlbr[0] + (height / 2)
         center_x = tlbr[1] + (width / 2)
-        bbox = [center_y*scale, center_x*scale, height*scale, width*scale]
+        bbox = [center_y * scale, center_x * scale, height * scale, width * scale]
         # bbox = [center_y, center_x, height, width]
         return bbox
 
@@ -186,41 +194,4 @@ class SensorConfig:
         return intrinsic
 
 # ==================================================
-import config as cfg
-import dataloader.preprocess as pr
 
-
-def test_a2d2_reader():
-    print("===== start test_a2d2_reader")
-    dataset_cfg = cfg.Datasets.A2D2
-    drive_mngr = A2D2DriveManager(dataset_cfg.PATH, "train")
-    drive_paths = drive_mngr.get_drive_paths()
-    reader = A2D2Reader(drive_paths[0], "train", dataset_cfg)
-    example = pr.ExamplePreprocess(target_hw=dataset_cfg.INPUT_RESOLUTION,
-                                   dataset_cfg=dataset_cfg,
-                                   category_names=cfg.Dataloader.MAJOR_CATE,
-                                   max_bbox=cfg.Dataloader.MAX_BBOX_PER_IMAGE,
-                                   )
-
-    for i in range(reader.num_frames()):
-        boxdict = dict()
-        image = reader.get_image(i)
-        bboxes = reader.get_2d_box(i)
-        boxdict["image"] = image
-        print("test1: ", boxdict["image"].shape)
-        boxdict["bboxes"] = bboxes
-        boxdict = example(boxdict)
-        print("test2: ", boxdict["image"].shape)
-
-        boxed_image = tu.draw_boxes(boxdict["image"], boxdict["bboxes"], dataset_cfg.CATEGORIES_TO_USE)
-        cv2.imshow("a2d2", boxed_image)
-        key = cv2.waitKey()
-        if key == ord('q'):
-            break
-    print("!!! test_a2d2_reader passed")
-
-
-
-
-if __name__ == "__main__":
-    test_a2d2_reader()

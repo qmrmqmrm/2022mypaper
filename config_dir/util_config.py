@@ -6,27 +6,35 @@ import config as cfg
 
 def get_channel_composition(is_gt: bool):
     if is_gt:
-        return cfg.ModelOutput.GRTR_MAIN_COMPOSITION
+        return cfg.ModelOutput.GRTR_FMAP_COMPOSITION
     else:
-        return cfg.ModelOutput.PRED_MAIN_COMPOSITION
+        return cfg.ModelOutput.PRED_FMAP_COMPOSITION
 
 
 def get_bbox_composition(is_gt: bool):
     if is_gt:
-        return cfg.ModelOutput.GRTR_NMS_COMPOSITION
+        return cfg.ModelOutput.GRTR_INST_COMPOSITION
     else:
-        return cfg.ModelOutput.PRED_NMS_COMPOSITION
+        return cfg.ModelOutput.PRED_INST_COMPOSITION
+
+
+def get_lane_channel_composition(is_gt: bool):
+    if is_gt:
+        return cfg.ModelOutput.GRTR_FMAP_LANE_COMPOSITION
+
+    else:
+        return cfg.ModelOutput.PRED_FMAP_LANE_COMPOSITION
 
 
 def get_lane_composition(is_gt: bool):
     if is_gt:
-        return cfg.ModelOutput.GRTR_LANE_COMPOSITION
+        return cfg.ModelOutput.GRTR_INST_LANE_COMPOSITION
     else:
-        return cfg.ModelOutput.PRED_LANE_COMPOSITION
+        return cfg.ModelOutput.PRED_INST_LANE_COMPOSITION
 
 
 def get_img_shape(code="HW", dataset="kitti", scale_div=1):
-    dataset_cfg = cfg.Datasets.DATASET_CONFIG
+    dataset_cfg = cfg.Datasets.TARGET_DATASET
     imsize = dataset_cfg.INPUT_RESOLUTION
     code = code.upper()
     if code == "H":

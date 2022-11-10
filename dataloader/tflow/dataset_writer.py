@@ -11,7 +11,7 @@ from timeit import default_timer as timer
 import utils.util_class as uc
 import utils.framework.util_function as uf
 from dataloader.example_maker import ExampleMaker
-import dataloader.framework.data_util as tu
+import dataloader.framework.tfrecord_util as tu
 import config as cfg
 
 
@@ -22,9 +22,15 @@ def drive_manager_factory(dataset_name, split, srcpath):
     elif dataset_name == "uplus":
         from dataloader.readers.uplus_reader import UplusDriveManager
         return UplusDriveManager(srcpath, split)
+    elif dataset_name == "uplus21":
+        from dataloader.readers.uplus21_reader import UplusDriveManager
+        return UplusDriveManager(srcpath, split)
     elif dataset_name == "a2d2":
         from dataloader.readers.a2d2_reader import A2D2DriveManager
         return A2D2DriveManager(srcpath, split)
+    elif dataset_name == "city":
+        from dataloader.readers.city_reader import CityDriveManager
+        return CityDriveManager(srcpath, split)
     else:
         assert 0, f"[drive_manager_factory] invalid dataset name: {dataset_name}"
 
@@ -39,6 +45,9 @@ def drive_reader_factory(dataset_name, dataset_cfg, split, drive_path):
     elif dataset_name == "a2d2":
         from dataloader.readers.a2d2_reader import A2D2Reader
         return A2D2Reader(drive_path, split, dataset_cfg)
+    elif dataset_name == "city":
+        from dataloader.readers.city_reader import CityReader
+        return CityReader(drive_path, split, dataset_cfg)
     else:
         assert 0, f"[drive_reader_factory] invalid dataset name: {dataset_name}"
 
@@ -51,8 +60,7 @@ class TfrecordMaker:
     """
     def __init__(self, dataset_cfg, split, tfrpath, shard_size,
                  drive_example_limit=0,
-                 total_example_limit=0,
-                 anchors_pixel=cfg.Dataloader.ANCHORS_PIXEL):
+                 total_example_limit=0):
         self.dataset_cfg = dataset_cfg
         self.split = split                  # split name e.g. "train", "val", "test
         self.tfrpath__ = tfrpath + "__"     # temporary path to write dataloader
@@ -73,16 +81,6 @@ class TfrecordMaker:
         self.serializer = tu.TfrSerializer()
         self.writer = None
         self.path_manager = uc.PathManager([""])
-        # self.anchors_per_scale = self.split_anchors(anchors_pixel)
-
-    # def split_anchors(self, anchors_pixel):
-    #     anchors = dict()
-    #     for i, feat_name in enumerate(cfg.ModelOutput.FEATURE_ORDER):
-    #         # tolist() results in small errors e.g. 1.1 -> 1.099999999
-    #         scale_anchors = anchors_pixel[i * 3:i * 3 + 3].tolist()
-    #         scale_anchors = [[round(anc[0], 1), round(anc[1], 1)] for anc in scale_anchors]
-    #         anchors[feat_name.replace("feature", "anchor")] = scale_anchors
-    #     return anchors
 
     def make(self):
         print("\n\n========== Start dataset:", self.dataset_cfg.NAME)
@@ -128,8 +126,8 @@ class TfrecordMaker:
 
     def write_drive(self, drive_path):
         data_reader = drive_reader_factory(self.dataset_cfg.NAME, self.dataset_cfg, self.split, drive_path)
-        example_maker = ExampleMaker(data_reader, self.dataset_cfg, self.split)
-        num_drive_frames = data_reader.num_frames()
+        example_maker = ExampleMaker(data_reader, self.dataset_cfg, self.split, self.tfr_drive_path)
+        num_drive_frames = min(cfg.Datasets.MAX_FRAMES, data_reader.num_frames())
         drive_example = {}
 
         for index in range(num_drive_frames):
@@ -169,7 +167,7 @@ class TfrecordMaker:
         # check key change
         if list(drive_example.keys()) != list(example.keys()):
             self.error_count += 1
-            assert self.error_count < 10, "too frequent errors"
+            assert self.error_count < 100, "too frequent errors"
             raise uc.MyExceptionToCatch(f"[verify_example] error count: {self.error_count}, different keys:\n"
                                         f"{list(drive_example.keys())} != {list(example.keys())}")
         # check shape change
@@ -178,7 +176,7 @@ class TfrecordMaker:
                 continue
             if drive_example[key].shape != example[key].shape:
                 self.error_count += 1
-                assert self.error_count < 10, "too frequent errors"
+                assert self.error_count < 100, "too frequent errors"
                 raise uc.MyExceptionToCatch(f"[verify_example] error count: {self.error_count}, "
                       f"different shape of {key}: {drive_example[key].shape} != {example[key].shape}")
         return drive_example

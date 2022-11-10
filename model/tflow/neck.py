@@ -42,40 +42,28 @@ class NeckBase:
         x = self.conv2d_k1(x, channel)
         return x
 
-    def make_output(self, x, channel):
-        x = self.conv2d(x, channel)
-        x = self.conv2d_output(x, self.num_anchors_per_scale * self.out_channels)
-        batch, height, width, channel = x.shape
-        x_5d = tf.reshape(x, (batch, height, width, self.num_anchors_per_scale, self.out_channels))
-        return x_5d
+    def coordconv(self, feature, with_r=False):
+        batch_size = tf.shape(feature)[0]
+        x_dim = tf.shape(feature)[2]
+        y_dim = tf.shape(feature)[1]
 
-    def make_lane_output(self, x, channel):
-        batch_mesh = x.shape[0]
-        height_mesh, width_mesh = tf.cast(x.shape[1], dtype=tf.float32), tf.cast(x.shape[2], dtype=tf.float32)
-        spatial_layer = uf.get_meshgrid(height_mesh, width_mesh) - tf.cast([height_mesh // 2, width_mesh // 2],
-                                                                           dtype=tf.float32)
+        xx_indices = tf.tile(tf.expand_dims(tf.expand_dims(tf.range(x_dim), 0), 0), [batch_size, y_dim, 1])
+        xx_indices = tf.expand_dims(xx_indices, -1)
 
-        spatial_layer = tf.expand_dims(spatial_layer, axis=0)
-        x = tf.concat([x, tf.repeat(spatial_layer, batch_mesh, axis=0)], axis=-1)
-        x = self.conv2d(x, channel)
-        # TODO
-        x = self.conv2d_output(x, self.lane_out_channels)
-        channel_per_achor = self.lane_out_channels / self.num_lane_anchors
-        batch, height, width, _ = x.shape
-        x_5d = tf.reshape(x, (batch, height, width, self.num_lane_anchors, channel_per_achor))
-        return x_5d
+        yy_indices = tf.tile(tf.expand_dims(tf.reshape(tf.range(y_dim), (y_dim, 1)), 0), [batch_size, 1, x_dim])
+        yy_indices = tf.expand_dims(yy_indices, -1)
 
-    def coordconv(self, feature):
-        b = tf.shape(input=feature)[0]
-        h = tf.shape(input=feature)[1]
-        w = tf.shape(input=feature)[2]
-        w_f = tf.cast(w, tf.float32)
-        h_f = tf.cast(h, tf.float32)
-        x_range = tf.range(w_f, dtype=tf.float32) / (w_f - 1) * 1.4 - 0.2
-        y_range = tf.range(h_f, dtype=tf.float32) / (h_f - 1) * 1.4 - 0.2
-        x_range = tf.tile(x_range[tf.newaxis, tf.newaxis, :, tf.newaxis], [b, h, 1, 1])
-        y_range = tf.tile(y_range[tf.newaxis, :, tf.newaxis, tf.newaxis], [b, 1, w, 1])
-        coord_feature = tf.concat([feature, x_range, y_range], -1)
+        xx_indices = tf.divide(xx_indices, x_dim - 1)
+        yy_indices = tf.divide(yy_indices, y_dim - 1)
+
+        xx_indices = tf.cast(tf.subtract(tf.multiply(xx_indices, 2.), 1.), dtype=feature.dtype)
+        yy_indices = tf.cast(tf.subtract(tf.multiply(yy_indices, 2.), 1.), dtype=feature.dtype)
+
+        coord_feature = tf.concat([feature, xx_indices, yy_indices], axis=-1)
+        if with_r:
+            rr = tf.sqrt(tf.add(tf.square(xx_indices - 0.5),
+                                tf.square(yy_indices - 0.5)))
+            coord_feature = tf.concat([coord_feature, rr], axis=-1)
 
         return coord_feature
 
@@ -85,6 +73,7 @@ class FPN(NeckBase):
         super().__init__(model_cfg, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
 
     def __call__(self, input_features):
+        features = list()
         large = input_features["feature_l"]
         medium = input_features["feature_m"]
         small = input_features["feature_s"]
@@ -98,8 +87,10 @@ class FPN(NeckBase):
         conv_small = self.upsample_concat(conv_medium, small, 128)
         conv_small = self.conv_5x(conv_small, 128)
         conv_small = self.conv2d(conv_small, 256)
-        conv_result = {"feature_l": conv_large, "feature_m": conv_medium, "feature_s": conv_small}
-        return conv_result
+        features.append(conv_small)
+        features.append(conv_medium)
+        features.append(conv_large)
+        return features
 
     def upsample_concat(self, upper, lower, channel):
         x = self.conv2d_k1(upper, channel)
@@ -119,6 +110,7 @@ class PPFPN(NeckBase):
         self.dropblock = DropBlock2D(keep_prob=0.9, block_size=3)
 
     def __call__(self, input_features):
+        features = list()
         large = input_features["feature_l"]
         medium = input_features["feature_m"]
         small = input_features["feature_s"]
@@ -140,10 +132,10 @@ class PPFPN(NeckBase):
         conv_s = self.conv2d_k1v(conv_s, 128)
         conv_s = self.conv_block(conv_s, 128, True)
         conv_s = self.conv_block(conv_s, 128)
-
-        conv_result = {"feature_l": conv_l, "feature_m": conv_m, "feature_s": conv_s}
-
-        return conv_result
+        features.append(conv_s)
+        features.append(conv_m)
+        features.append(conv_l)
+        return features
 
     def upsample_concat(self, upper, lower, channel):
         x = self.coordconv(upper)
@@ -185,31 +177,36 @@ class PAN(NeckBase):
         self.pool3 = tf.keras.layers.MaxPool2D(pool_size=(13, 13), padding='same', strides=(1, 1))
 
     def __call__(self, input_features):
+        conv_result = list()
         if cfg.Architecture.USE_SPP:
-            large = self.sppblock(input_features["feature_l"])
+            large = self.sppblock(input_features[2])
         else:
-            large = input_features["feature_l"]
-        medium = input_features["feature_m"]
-        small = input_features["feature_s"]
+            large = input_features[2]
+        medium = input_features[1]
+        small = input_features[0]
 
         if cfg.Architecture.COORD_CONV:
-            large = self.coordconv(input_features["feature_l"])
-            medium = self.coordconv(input_features["feature_m"])
-            small = self.coordconv(input_features["feature_s"])
+            large = self.coordconv(large)
+            large = self.conv2d_k1(large, 1024)
+            medium = self.coordconv(medium)
+            medium = self.conv2d_k1(medium, 512)
+            small = self.coordconv(small)
+            small = self.conv2d_k1(small, 256)
 
         conv = self.upsample_concat(large, medium, 256)
         medium_bridge = self.conv_5x(conv, 256)
 
         conv = self.upsample_concat(medium_bridge, small, 128)
         conv_small = self.conv_5x(conv, 128)
+        conv_result.append(conv_small)
 
         conv_common = self.downsample_concat(conv_small, medium_bridge, 256)
         conv_medium = self.conv_5x(conv_common, 256)
+        conv_result.append(conv_medium)
 
         conv = self.downsample_concat(conv_medium, large, 512)
         conv_large = self.conv_5x(conv, 512)
-
-        conv_result = {"feature_3": conv_small, "feature_4": conv_medium, "feature_5": conv_large}
+        conv_result.append(conv_large)
         return conv_result
 
     def upsample_concat(self, upper, lower, channel):
@@ -243,7 +240,23 @@ class PAN(NeckBase):
         x1 = self.pool1(x)
         x2 = self.pool2(x)
         x3 = self.pool3(x)
-        output = tf.concat([x3, x2, x1, x], axis=-1)
+        spp_output = tf.concat([x3, x2, x1, x], axis=-1)
+        x = self.conv2d_k1(spp_output, 512)
+        x = self.conv2d(x, 1024)
+        output = self.conv2d_k1(x, 512)
+        return output
+
+    def sppfblock(self, input_tensors):
+        x = self.conv2d_k1(input_tensors, 512)
+        x = self.conv2d(x, 1024)
+        x = self.conv2d_k1(x, 512)
+        x1 = self.pool1(x)
+        x2 = self.pool1(x1)
+        x3 = self.pool1(x2)
+        spp_output = tf.concat([x3, x2, x1, x], axis=-1)
+        x = self.conv2d_k1(spp_output, 512)
+        x = self.conv2d(x, 1024)
+        output = self.conv2d_k1(x, 512)
         return output
 
 
@@ -252,7 +265,7 @@ class BiFPN(NeckBase):
         super().__init__(model_cfg, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
         self.num_channels = cfg.Architecture.Efficientnet.Channels[0]
         self.d_bifpns = cfg.Architecture.Efficientnet.Channels[1]
-        self.maxpool2d_p3 = mu.CustomMax2D(pool_size=3, strides=2, padding="same", scope="neck")
+        self.maxpool2d_p3 = tf.keras.layers.MaxPool2D(pool_size=(3, 3), padding='same', strides=(2, 2))
         self.spconv2d = mu.CustomSeparableConv2D(kernel_size=3, strides=1,  **model_cfg)
 
     def __call__(self, input_features):
@@ -262,9 +275,10 @@ class BiFPN(NeckBase):
         return conv_result
 
     def frist_block(self, features):
-        P3_in = features['feature_s']
-        P4_in = features['feature_m']
-        P5_in = features['feature_l']
+        out_features = list()
+        P3_in = features[0]
+        P4_in = features[1]
+        P5_in = features[2]
 
         P6_in = self.conv2d_k1(P5_in, self.num_channels)
         P6_in = self.maxpool2d_p3(P6_in)
@@ -284,34 +298,36 @@ class BiFPN(NeckBase):
         P3_in = self.conv2d_k1(P3_in, self.num_channels)
         P3_out = self.up_sampling(P4_td, P3_in)
         P3_out = self.spconv2d(P3_out, self.num_channels)
+        out_features.append(P3_out)
 
         P4_in_2 = self.conv2d_k1(P4_in, self.num_channels)
         P4_out = self.down_sampling(P3_out, P4_td, P4_in_2)
         P4_out = self.spconv2d(P4_out, self.num_channels)
+        out_features.append(P4_out)
 
         P5_in_2 = self.conv2d_k1(P5_in, self.num_channels)
         P5_out = self.down_sampling(P4_out, P5_td, P5_in_2)
         P5_out = self.spconv2d(P5_out, self.num_channels)
+        out_features.append(P5_out)
 
         P6_out = self.down_sampling(P5_out, P6_td, P6_in)
         P6_out = self.spconv2d(P6_out, self.num_channels)
+        out_features.append(P6_out)
 
         P6_D = self.maxpool2d_p3(P6_out)
         P7_out = tf.keras.layers.Add()([P7_in, P6_D])
         P7_out = tf.keras.layers.Activation(lambda x: tf.nn.swish(x))(P7_out)
         P7_out = self.spconv2d(P7_out, self.num_channels)
-
-        out_features = {"feature_3": P3_out, "feature_4": P4_out, "feature_5": P5_out, "feature_6": P6_out,
-                        "feature_7": P7_out}
-
+        out_features.append(P7_out)
         return out_features
 
     def blocks(self, features):
-        P3_in = features['feature_3']
-        P4_in = features['feature_4']
-        P5_in = features['feature_5']
-        P6_in = features['feature_6']
-        P7_in = features['feature_7']
+        out_features = list()
+        P3_in = features[0]
+        P4_in = features[1]
+        P5_in = features[2]
+        P6_in = features[3]
+        P7_in = features[4]
         P6_td = self.up_sampling(P7_in, P6_in)
         P6_td = self.spconv2d(P6_td, self.num_channels)
 
@@ -323,24 +339,25 @@ class BiFPN(NeckBase):
 
         P3_out = self.up_sampling(P4_td, P3_in)
         P3_out = self.spconv2d(P3_out, self.num_channels)
+        out_features.append(P3_out)
 
         P4_out = self.down_sampling(P3_out, P4_td, P4_in)
         P4_out = self.spconv2d(P4_out, self.num_channels)
+        out_features.append(P4_out)
 
         P5_out = self.down_sampling(P4_out, P5_td, P5_in)
         P5_out = self.spconv2d(P5_out, self.num_channels)
+        out_features.append(P5_out)
 
         P6_out = self.down_sampling(P5_out, P6_td, P6_in)
         P6_out = self.spconv2d(P6_out, self.num_channels)
+        out_features.append(P6_out)
 
         P6_D = self.maxpool2d_p3(P6_out)
         P7_out = tf.keras.layers.Add()([P7_in, P6_D])
         P7_out = tf.keras.layers.Activation(lambda x: tf.nn.swish(x))(P7_out)
         P7_out = self.spconv2d(P7_out, self.num_channels)
-
-        out_features = {"feature_3": P3_out, "feature_4": P4_out, "feature_5": P5_out, "feature_6": P6_out,
-                        "feature_7": P7_out}
-
+        out_features.append(P7_out)
         return out_features
 
     def up_sampling(self, upper, lower):

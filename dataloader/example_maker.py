@@ -1,35 +1,36 @@
 import numpy as np
+import os
 import cv2
 
-
-import dataloader.framework.data_util as tu
+import dataloader.data_util as tu
 
 import dataloader.preprocess as pr
 import config as cfg
 
 
 class ExampleMaker:
-    def __init__(self, data_reader, dataset_cfg, split,
+    def __init__(self, data_reader, dataset_cfg, split, tfr_drive_path,
                  feat_scales=cfg.ModelOutput.FEATURE_SCALES,
-                 anchors_pixel=cfg.Dataloader.ANCHORS_PIXEL,
                  category_names=cfg.Dataloader.CATEGORY_NAMES,
                  max_bbox=cfg.Dataloader.MAX_BBOX_PER_IMAGE,
                  max_lane=cfg.Dataloader.MAX_LANE_PER_IMAGE,
+                 max_lpoints=cfg.Dataloader.MAX_POINTS_PER_LANE,
                  max_dontcare=cfg.Dataloader.MAX_DONT_PER_IMAGE):
         self.data_reader = data_reader
         self.feat_scales = feat_scales
         self.category_names = category_names
-        self.anchors_ratio = anchors_pixel / np.array([dataset_cfg.INPUT_RESOLUTION])
-        self.anchors_lane = cfg.Dataloader.ANCHORS_LANE
-        self.lane_detect_rows = cfg.Dataloader.LANE_DETECT_ROWS
         self.include_lane = dataset_cfg.INCLUDE_LANE
+        self.tfr_drive_path = tfr_drive_path
         self.max_bbox = max_bbox
+        self.save_image = False
         self.preprocess_example = pr.ExamplePreprocess(target_hw=dataset_cfg.INPUT_RESOLUTION,
                                                        dataset_cfg=dataset_cfg,
                                                        max_bbox=max_bbox,
                                                        max_lane=max_lane,
+                                                       max_lpoints=max_lpoints,
                                                        max_dontcare=max_dontcare,
                                                        min_pix=cfg.Dataloader.MIN_PIX[split],
+                                                       lane_min_pix=cfg.Dataloader.LANE_MIN_PIX[split],
                                                        category_names=category_names
                                                        )
 
@@ -37,17 +38,15 @@ class ExampleMaker:
         example = dict()
         example["image"] = self.data_reader.get_image(index)
         raw_hw_shape = example["image"].shape[:2]
-        box2d, categories = self.data_reader.get_2d_box(index, raw_hw_shape)
-        example["bbox2d"], example["dontcare"] = self.merge_box_and_category(box2d, categories)
+        bboxes, categories = self.data_reader.get_bboxes(index, raw_hw_shape)
+        example["inst_box"], example["inst_dc"] = self.merge_box_and_category(bboxes, categories)
         if self.include_lane:
-            example["lane_points"], example["lane_types"] = self.data_reader.get_raw_lane_pts(index, raw_hw_shape)
+            lanes_point, lane_categories = self.data_reader.get_raw_lane_pts(index, raw_hw_shape)
+            example["lanes_point"], example["lanes_type"] = self.merge_lane_and_category(lanes_point, lane_categories)
 
         example = self.preprocess_example(example)
-
-        if self.include_lane:
-            del example["lane_points"]
-        if index % 100 == 10:
-            self.show_example(example)
+        if index % 10 == 5:
+            self.show_example(example, index)
         return example
 
     def extract_bbox(self, example):
@@ -107,11 +106,29 @@ class ExampleMaker:
         bboxes = bboxes[bboxes[..., 5] >= 0]
         return bboxes, dontcare
 
-    def show_example(self, example):
-        image = tu.draw_boxes(example["image"], example["bboxes"], self.category_names)
-        if self.include_lane:
-            image = tu.draw_lanes(image, example["lanes"], self.category_names)
+    def merge_lane_and_category(self, lanes, categories):
+        reamapped_categories = []
+        for index, category_str in enumerate(categories):
+            if category_str in self.category_names["lane"]:
+                major_index = self.category_names["lane"].index(category_str)
+            elif category_str in self.category_names["dont_lane"]:
+                major_index = -1
+            else:
+                major_index = -2
+            reamapped_categories.append(major_index)
+        return lanes, reamapped_categories
 
+    def show_example(self, example, index):
+        image_dir = os.path.join(self.tfr_drive_path, "test_image")
+        os.makedirs(image_dir,exist_ok=True)
+
+        image = example["image"]
+        image = tu.draw_boxes(image, example["inst_box"], self.category_names, frame_name=self.data_reader.frame_names[index])
+
+        if self.include_lane:
+            image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.category_names)
         cv2.imshow("image with feature bboxes", image)
         cv2.waitKey(100)
-
+        if self.save_image:
+            image_file = os.path.join(self.tfr_drive_path, "test_image", str(index) + ".png")
+            cv2.imwrite(image_file, image)

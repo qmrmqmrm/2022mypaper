@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+import cv2
 import tensorflow as tf
 
 import config as cfg
@@ -77,61 +78,54 @@ def concat_box_output(output, boxes):
     return output
 
 
-def merge_and_slice_features(features, is_gt):
+def convert_box_scale_01_to_pixel(boxes_norm):
     """
-    :param features: this dict has keys feature_l,m,s and corresponding tensors are in (batch, grid_h, grid_w, anchors, dims)
-    :param is_gt: is ground truth feature map?
-    :return: sliced feature maps in each scale
+    :boxes_norm: yxhw format boxes scaled into 0~1
+    :return:
     """
-    # scales = [key for key in features if "feature" in key]  # ['feature_l', 'feature_m', 'feature_s']
-    # scales += [key for key in features if "featraw" in key]  # ['featraw_l', 'featraw_m', 'featraw_s']
-    sliced_features = {"inst": {}, "feat": []}
-    for raw_feat in features["feat"]:
-        merged_feat = merge_dim_hwa(raw_feat)
-        channel_compos = uc.get_channel_composition(is_gt)
-        sliced_features["feat"].append(slice_feature(merged_feat, channel_compos))
+    img_res = cfg.Datasets.DATASET_CONFIG.INPUT_RESOLUTION
+    img_res = [*img_res, *img_res]
+    output = [boxes_norm[..., :4] * img_res]
+    output = concat_box_output(output, boxes_norm)
+    return output
 
-    sliced_features["feat"] = scale_align_featmap(sliced_features["feat"])
 
-    # TODO check featraw
-    if cfg.ModelOutput.FEAT_RAW:
-        raw_names = [name for name in features if "raw" in name]
-        for raw_name in raw_names:
-            raw_sliced = {raw_name: []}
-            for raw_feat in features[raw_name]:
-                merged_feat = merge_dim_hwa(raw_feat)
-                channel_compos = uc.get_channel_composition(is_gt)
-                raw_sliced[raw_name].append(slice_feature(merged_feat, channel_compos))
-            raw_sliced[raw_name] = scale_align_featmap(raw_sliced[raw_name])
-            sliced_features.update(raw_sliced)
+def merge_and_slice_features(featin, is_gt: bool, feat_type: str):
+    featout = {}
+    if feat_type == "inst_box":
+        composition = uc.get_bbox_composition(is_gt)
+        featout["merged"] = featin
+        featout.update(slice_feature(featin, composition))
 
-    # scales = [key for key in features if "featraw" in key]  # ['feature_l', 'feature_m', 'feature_s']
-    # for key in scales:
-    #     raw_feat = features[key]
-    #     merged_feat = merge_dim_hwa(raw_feat)
-    #     channel_compos = cfg.ModelOutput.get_channel_composition(is_gt)
-    #     sliced_features[key] = slice_feature(merged_feat, channel_compos)
+    if feat_type == "inst_dc":
+        composition = uc.get_bbox_composition(is_gt)
+        featout["merged"] = featin
+        featout.update(slice_feature(featin, composition))
 
-    if "bboxes" in features["inst"]:
-        bbox_compos = uc.get_bbox_composition(is_gt)
-        sliced_features["inst"]["bboxes"] = slice_feature(features["inst"]["bboxes"], bbox_compos)
+    if feat_type == "inst_lane":
+        composition = uc.get_lane_composition(is_gt)
+        featout["merged"] = featin
+        featout.update(slice_feature(featin, composition))
 
-    if "dontcare" in features["inst"]:
-        bbox_compos = uc.get_bbox_composition(is_gt)
-        sliced_features["inst"]["dontcare"] = slice_feature(features["inst"]["dontcare"], bbox_compos)
+    if feat_type.startswith("feat_box"):
+        composition = uc.get_channel_composition(is_gt)
+        newfeat = []
+        featout["whole"] = featin
+        for scale_data in featin:
+            newfeat.append(slice_feature(scale_data, composition))
+        newfeat = scale_align_featmap(newfeat)
+        featout.update(newfeat)
 
-    if "feat_lane" in features:
-        merged_feat = merge_dim_hwa(features["feat_lane"])
-        lane_compos = uc.get_lane_composition(is_gt)
-        sliced_features["feat_lane"] = slice_feature(merged_feat, lane_compos)
+    if feat_type.startswith("feat_lane"):
+        composition = uc.get_lane_channel_composition(is_gt)
+        newfeat = []
+        featout["whole"] = featin
+        for scale_data in featin:
+            newfeat.append(slice_feature(scale_data, composition))
+        newfeat = scale_align_featmap(newfeat)
+        featout.update(newfeat)
 
-    if "lanes" in features["inst"]:
-        lane_compos = uc.get_lane_composition(is_gt)
-        sliced_features["inst"]["lanes"] = slice_feature(features["inst"]["lanes"], lane_compos)
-
-    other_features = {key: val for key, val in features.items() if key not in sliced_features}
-    sliced_features.update(other_features)
-    return sliced_features
+    return featout
 
 
 def slice_feature(feature, channel_composition):
@@ -212,10 +206,140 @@ def compute_iou_general(grtr_yxhw, pred_yxhw, grtr_tlbr=None, pred_tlbr=None):
     return iou
 
 
+def compute_lane_iou(grtr, pred):
+    grtr = tf.convert_to_tensor(grtr)
+    pred = tf.convert_to_tensor(pred)
+    overlap = []
+    grtr_lane_num = grtr.shape[1]
+    pred_lane_num = pred.shape[1]
+    for batch_grtr, batch_pred in zip(grtr, pred):
+        # batch_grtr_np = batch_grtr.numpy()
+        # batch_pred_np = batch_pred.numpy()
+        grtr_ind = np.where(batch_grtr[..., 1] > 0)[0]
+        pred_ind = np.where(batch_pred[..., 1] > 0)[0]
+        batch_grtr = batch_grtr[batch_grtr[..., 1] > 0]
+        batch_pred = batch_pred[batch_pred[..., 1] > 0]
+
+        gt_line_params, gt_line_spts, gt_line_epts = compute_line_segment(batch_grtr, "grtr")
+        pred_line_params, pred_line_spts, pred_line_epts = compute_line_segment(batch_pred, "pred")
+        batch_overlap = compute_overlap(gt_line_params, gt_line_spts, gt_line_epts,
+                                        pred_line_params, pred_line_spts, pred_line_epts)
+
+        batch_overlap = overlap_zero_padding(batch_overlap, grtr_lane_num, pred_lane_num, grtr_ind, pred_ind)
+        overlap.append(batch_overlap)
+    overlap = tf.stack(overlap, axis=0)
+    return overlap.numpy()
+
+
+def overlap_zero_padding(overlap, grtr_num, pred_num, grtr_ind, pred_ind):
+    zero_pad = np.zeros((grtr_num, pred_num))
+    n, m = overlap.shape
+    zero_pad[grtr_ind[...,np.newaxis], pred_ind[np.newaxis,...]] = overlap.numpy()
+    return tf.convert_to_tensor(zero_pad)
+
+
+def compute_lane_iou_with_cv2(grtr, pred, image_shape):
+    """
+    grtr : ndarray (4,10,10)
+    pred : ndarray (4,10,10)
+    """
+    batch, n, points = grtr.shape
+    batch, m, points = pred.shape
+    h, w = image_shape
+    image_shape = np.array(image_shape)
+    batch_overlap = np.zeros((batch, n, m), dtype=np.float32)
+    for batch_idx in range(batch):
+        batch_grtr = grtr[batch_idx]
+        batch_pred = pred[batch_idx]
+        grtr_ind = np.where(batch_grtr[..., 0] > 0)
+        pred_ind = np.where(batch_pred[..., 0] > 0)
+        for grtr_idx in grtr_ind[0]:
+            grtr_zero_image = np.zeros((h, w, 3))
+            grtr_lane = batch_grtr[grtr_idx].reshape(-1, 2) * image_shape
+            grtr_image = draw_line(grtr_lane, grtr_zero_image, (0, 0, 255))
+            gt_pixel = np.sum(grtr_image[..., 2] == 255)
+
+            for pred_idx in pred_ind[0]:
+                pred_zero_image = np.zeros((h, w, 3))
+                pred_lane = batch_pred[pred_idx].reshape(-1, 2) * image_shape
+                pred_image = draw_line(pred_lane, pred_zero_image, (255, 0, 0))
+                pred_pixel = np.sum(pred_image[..., 0] == 255)
+                lane_image = (pred_image + grtr_image)
+                # cv2.imshow("nms", lane_image)
+                # cv2.waitKey(100)
+                overlap_pixel = np.sum((lane_image[..., 0] == 255) & (lane_image[..., 2] == 255))
+                overlap = overlap_pixel / (gt_pixel + pred_pixel - overlap_pixel)
+                batch_overlap[batch_idx][grtr_idx][pred_idx] = overlap
+    return batch_overlap
+
+
+def compute_line_segment(five_points, name):
+    """
+    param five_points : (lane_num,10)
+
+    """
+    lane_num, c = five_points.shape
+    fpoints = tf.reshape(five_points, (lane_num, -1, 2))  # (b,h,w, 5, 2)
+    fpoints_t = tf.transpose(fpoints, perm=[0, 2, 1])
+    ptp = tf.matmul(fpoints_t, fpoints)
+    det = tf.linalg.det(ptp)[..., tf.newaxis, tf.newaxis]
+    inv = (1 / det) * tf.concat(
+        [tf.concat([tf.convert_to_tensor(ptp[..., 1:2, 1:2]), tf.convert_to_tensor(-ptp[..., 0:1, 1:2])], axis=-1),
+         tf.concat([tf.convert_to_tensor(-ptp[..., 1:2, 0:1]), tf.convert_to_tensor(ptp[..., 0:1, 0:1])], axis=-1)],
+        axis=-2)
+    ptpinv = tf.matmul(inv, fpoints_t)
+    n, c1, c2 = ptpinv.shape
+    y = tf.ones((n, c2, 1), dtype=tf.float32)
+    x = tf.matmul(ptpinv, y)
+    spts = fpoints[..., 0:1, :]
+    epts = fpoints[..., -1:, :]
+    line_params = tf.transpose(x, perm=[0, 2, 1])
+
+    line_spts = spts - tf.matmul((tf.matmul(spts, x) - 1) / tf.linalg.norm(x), line_params)
+    line_epts = epts - tf.matmul((tf.matmul(epts, x) - 1) / tf.linalg.norm(x), line_params)
+    return tf.reshape(line_params, [-1, 2]), tf.reshape(line_spts, [-1, 2]), tf.reshape(line_epts, [-1, 2])
+
+
+def compute_overlap(gt_line_params, gt_spts, gt_epts, pred_line_params, pred_spts, pred_epts):
+    gt_lane_num, c = gt_spts.shape
+    gt_norm_x = tf.linalg.norm(gt_line_params, axis=-1, keepdims=True)
+    pred_norm_x = tf.linalg.norm(pred_line_params, axis=-1, keepdims=True)
+    gt_ones_tenser = tf.ones((gt_lane_num, 1))
+    gt_spts = tf.concat([gt_spts, gt_ones_tenser], axis=-1)
+    gt_epts = tf.concat([gt_epts, gt_ones_tenser], axis=-1)
+    gt_x = tf.concat([gt_line_params, -gt_ones_tenser], axis=-1)
+    pred_lane_num, c = pred_spts.shape
+    pred_ones_tenser = tf.ones((pred_lane_num, 1))
+    pred_spts = tf.concat([pred_spts, pred_ones_tenser], axis=-1)
+    pred_epts = tf.concat([pred_epts, pred_ones_tenser], axis=-1)
+    pred_x = tf.concat([pred_line_params, -pred_ones_tenser], axis=-1)
+
+    dist_gt_spts = tf.squeeze(1 / gt_norm_x) * tf.abs(tf.matmul(pred_x, tf.transpose(gt_spts)))
+    dist_gt_epts = tf.squeeze(1 / gt_norm_x) * tf.abs(tf.matmul(pred_x, tf.transpose(gt_epts)))
+
+    dist_pred_spts = tf.abs(tf.matmul(gt_x, tf.transpose(pred_spts))) * tf.squeeze(1 / pred_norm_x)
+    dist_pred_epts = tf.abs(tf.matmul(gt_x, tf.transpose(pred_epts))) * tf.squeeze(1 / pred_norm_x)
+
+    dist_gt = (dist_gt_spts + dist_gt_epts) / 2
+    dist_pred = (dist_pred_spts + dist_pred_epts) / 2
+    overlap = 1 - tf.minimum(tf.transpose(dist_gt), dist_pred)
+    return overlap
+
+
 def get_meshgrid(height, width):
     grid_x, grid_y = tf.meshgrid(tf.range(width), tf.range(height))
     meshgrid = tf.stack([grid_y, grid_x], axis=-1)
     return meshgrid
+
+
+def draw_line(lines, image, color):
+    for i in range(lines.shape[0] - 1):
+        cv2.line(image,
+                 (int(lines[i, 1]), int(lines[i, 0])),
+                 (int(lines[i + 1, 1]), int(lines[i + 1, 0])),
+                 color, int(50 * 0.4)
+                 )
+    return image
 
 
 def convert_tensor_to_numpy(feature):
@@ -245,9 +369,57 @@ def reduce_max(value, axis=None):
     return tf.reduce_max(input_tensor=value, axis=axis)
 
 
+def reduce_min(value, axis=None):
+    return tf.reduce_min(input_tensor=value, axis=axis)
+
+
 def maximum(x, y):
     return tf.maximum(x=x, y=y)
 
 
 def cast(value, dtype):
     return tf.cast(x=value, dtype=dtype)
+
+
+def print_structure(title, data, key=""):
+    if isinstance(data, list):
+        for i, datum in enumerate(data):
+            print_structure(title, datum, f"{key}/{i}")
+    elif isinstance(data, dict):
+        for subkey, datum in data.items():
+            print_structure(title, datum, f"{key}/{subkey}")
+    elif isinstance(data, str):
+        print(title, key, data)
+    elif isinstance(data, tuple):
+        for i, datum in enumerate(data):
+            print_structure(title, datum, f"{key}/{i}")
+    elif data is None:
+        print(f'{title} : None')
+    elif isinstance(data, int):
+        print(title, key, data)
+    elif type(data) == np.ndarray:
+        print(title, key, data.shape, type(data))
+    else:
+        print(title, key, data.shape, type(data))
+
+
+# [B, H, W, A, C]
+def merge_scale(features, is_loss=False):
+    stacked_feat = {}
+    if is_loss:
+        slice_keys = list(key for key in features.keys() if "map" in key)  # ['ciou_map', 'object_map', 'category_map']
+    else:
+        slice_keys = list(features.keys())  # ['yxhw', 'object', 'category']
+    for key in slice_keys:
+        if key is not "whole":
+            # list of (batch, HWA in scale, dim)
+            scaled_preds = np.concatenate(features[key], axis=1)  # (batch, N, dim)
+            stacked_feat[key] = scaled_preds
+    return stacked_feat
+
+
+def avg_pool(feat):
+    b, h, w, a, c = feat.shape
+    feat = tf.reshape(feat, (b, h, w, -1))
+    feat = tf.keras.layers.AveragePooling2D((3, 3), 1, "same")(feat)
+    return tf.reshape(feat, (b, h, w, a, c))

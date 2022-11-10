@@ -13,7 +13,7 @@ from model.framework.model_factory import ModelFactory
 import utils.framework.util_function as uf
 import train.framework.train_util as tu
 import model.framework.model_util as mu
-from log.metric import count_true_positives
+from log.metric import count_true_positives_lane
 from train.feature_generator import FeatureMapDistributer
 
 
@@ -27,16 +27,13 @@ class EvaluateNmsParams:
         self.dataset_name = cfg.Datasets.TARGET_DATASET
         self.ckpt_path = op.join(cfg.Paths.CHECK_POINT, cfg.Train.CKPT_NAME)
         self.feat_scales = cfg.ModelOutput.FEATURE_SCALES
-        if cfg.ModelOutput.MINOR_CTGR:
-            self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["major"] + cfg.Dataloader.CATEGORY_NAMES["sign"]
-                                + cfg.Dataloader.CATEGORY_NAMES["mark"])
-        else:
-            self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["major"])
+        self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["lane"])
 
     def create_eval_file(self):
         dataset, steps, model, anchors_per_scale, feature_creator = self.load_dataset_model(self.dataset_name, self.ckpt_path)
-        perf_data = self.collect_recall_precision(dataset, steps, model, self.num_ctgr, anchors_per_scale, feature_creator)
-        self.save_results(perf_data, self.ckpt_path)
+        perf_data, perf_data_train = self.collect_recall_precision(dataset, steps, model, self.num_ctgr, anchors_per_scale, feature_creator)
+        self.save_results(perf_data, self.ckpt_path, "")
+        self.save_results(perf_data_train, self.ckpt_path, "_train")
 
     def load_dataset_model(self, dataset_name, ckpt_path):
         batch_size, train_mode, anchors = cfg.Train.BATCH_SIZE, cfg.Train.MODE, cfg.AnchorGeneration.ANCHORS
@@ -71,53 +68,80 @@ class EvaluateNmsParams:
         return model
 
     def collect_recall_precision(self, dataset, steps, model, num_ctgr, anchors_per_scale, feature_creator):
-        results = {"max_box": [], "iou_thresh": [], "score_thresh": []}
-        for max_box in cfg.NmsOptim.MAX_OUT_CANDIDATES:
-            for iou_thresh in cfg.NmsOptim.IOU_CANDIDATES:
-                for score_thresh in cfg.NmsOptim.SCORE_CANDIDATES[::-1]:
-                    results["max_box"].append(max_box)
+        results = {"max_lane": [], "iou_thresh": [], "score_thresh": []}
+        results_train = {"max_lane": [], "iou_thresh": [], "score_thresh": []}
+        for max_lane in cfg.NmsOptim.LANE_MAX_OUT_CANDIDATES:
+            for iou_thresh in cfg.NmsOptim.LANE_IOU_CANDIDATES:
+                for score_thresh in cfg.NmsOptim.LANE_SCORE_CANDIDATES[::-1]:
+                    results["max_lane"].append(max_lane)
                     results["iou_thresh"].append(iou_thresh)
                     results["score_thresh"].append(score_thresh)
+                    results_train["max_lane"].append(max_lane)
+                    results_train["iou_thresh"].append(iou_thresh)
+                    results_train["score_thresh"].append(score_thresh)
 
         results = {key: np.array(val) for key, val in results.items()}
-        num_params = results["max_box"].shape[0]
-        accum_keys = ["trpo", "grtr", "pred"]
+        results_train = {key: np.array(val) for key, val in results_train.items()}
+        num_params = results["max_lane"].shape[0]
+        accum_keys = ["trpo_lane", "grtr_lane", "pred_lane"]
         init_data = {key: np.zeros((num_params, num_ctgr), dtype=np.float32) for key in accum_keys}
+        init_data_train = {key: np.zeros((num_params, num_ctgr), dtype=np.float32) for key in accum_keys}
+
         results.update(init_data)
-        nms = mu.NonMaximumSuppressionBox()
+        results_train.update(init_data_train)
+        nms_lane = mu.NonMaximumSuppressionLane()
         for step, grtr in enumerate(dataset):
             features = feature_creator(grtr)
             start = timer()
             pred = model(grtr["image"])
-
             for i in range(num_params):
-                max_box = np.ones((num_ctgr,), dtype=np.float32) * results["max_box"][i]
+                max_lane = np.ones((num_ctgr,), dtype=np.float32) * results["max_lane"][i]
                 iou_thresh = np.ones((num_ctgr,), dtype=np.float32) * results["iou_thresh"][i]
                 score_thresh = np.ones((num_ctgr,), dtype=np.float32) * results["score_thresh"][i]
-                pred_bboxes = nms(pred["feat_box"], max_box, iou_thresh, score_thresh)
-                pred_bboxes = uf.slice_feature(pred_bboxes, uc.get_bbox_composition(False))
-                pred_bboxes = self.convert_tensor_to_numpy(pred_bboxes)
-                count_per_class = count_true_positives(features["inst_box"], pred_bboxes, features["inst_dc"],
-                                                       num_ctgr, iou_thresh=cfg.Validation.MAP_TP_IOU_THRESH,
-                                                       per_class=True)
+                lane_hw = pred["feat_lane"]["whole"][0].shape[1:3]
+                pred_lanes = nms_lane(pred["feat_lane"], lane_hw, max_lane, iou_thresh, score_thresh)
+                pred_lanes = uf.slice_feature(pred_lanes, uc.get_lane_composition(False))
+                pred_lanes = self.convert_tensor_to_numpy(pred_lanes)
+                img_shape = np.array(grtr["image"].shape[1:3])
+                count_per_class = count_true_positives_lane(features["inst_lane"], pred_lanes, num_ctgr,
+                                                            img_shape, iou_thresh=cfg.Validation.LANE_TP_IOU_THRESH,
+                                                            per_class=True, is_train=False)
+                count_per_class_train = count_true_positives_lane(features["inst_lane"], pred_lanes, num_ctgr,
+                                                            img_shape, iou_thresh=cfg.Validation.LANE_TP_IOU_THRESH,
+                                                            per_class=True, is_train=True)
 
                 for key in accum_keys:
                     results[key][i] += count_per_class[key]
+                    results_train[key][i] += count_per_class_train[key]
+
                 uf.print_progress(f"=== step: {i}/{num_params} {step}/{steps}, took {timer() - start:1.2f}s")
             uf.print_progress(f"=== step: {step}/{steps}, took {timer() - start:1.2f}s")
             # if step > 1:
             #     break
 
-        results["recall"] = np.divide(results["trpo"], results["grtr"], out=np.zeros_like(results["trpo"]),
-                                      where=(results["grtr"] != 0))
-        results["precision"] = np.divide(results["trpo"], results["pred"], out=np.zeros_like(results["trpo"]),
-                                         where=(results["pred"] != 0))
-        results["min_perf"] = np.minimum(results["recall"], results["precision"])
-        results["avg_perf"] = (results["recall"] + results["precision"]) / 2.
+        results["recall_lane"] = np.divide(results["trpo_lane"], results["grtr_lane"],
+                                      out=np.zeros_like(results["trpo_lane"]),
+                                      where=(results["grtr_lane"] != 0))
+        results["precision_lane"] = np.divide(results["trpo_lane"], results["pred_lane"],
+                                         out=np.zeros_like(results["trpo_lane"]),
+                                         where=(results["pred_lane"] != 0))
+        results["min_perf"] = np.minimum(results["recall_lane"], results["precision_lane"])
+        results["avg_perf"] = (results["recall_lane"] + results["precision_lane"]) / 2.
+
+        results_train["recall_lane"] = np.divide(results_train["trpo_lane"], results_train["grtr_lane"],
+                                      out=np.zeros_like(results_train["trpo_lane"]),
+                                      where=(results_train["grtr_lane"] != 0))
+        results_train["precision_lane"] = np.divide(results_train["trpo_lane"], results_train["pred_lane"],
+                                         out=np.zeros_like(results_train["trpo_lane"]),
+                                         where=(results_train["pred_lane"] != 0))
+        results_train["min_perf"] = np.minimum(results_train["recall_lane"], results_train["precision_lane"])
+        results_train["avg_perf"] = (results_train["recall_lane"] + results_train["precision_lane"]) / 2.
 
         for key, val in results.items():
             print(f"results: {key}\n{val[:10]}")
-        return results
+        for key, val in results_train.items():
+            print(f"results_train: {key}\n{val[:10]}")
+        return results, results_train
 
     def convert_tensor_to_numpy(self, feature):
         numpy_feature = dict()
@@ -131,13 +155,13 @@ class EvaluateNmsParams:
                 numpy_feature[key] = value.numpy()
         return numpy_feature
 
-    def save_results(self, perf_data, ckpt_path):
-        param_path = op.join(ckpt_path, "nms_param")
+    def save_results(self, perf_data, ckpt_path, train):
+        param_path = op.join(ckpt_path, f"nms_param_lane{train}")
         os.makedirs(param_path, exist_ok=True)
-        intkeys = ["trpo", "grtr", "pred"]
+        intkeys = ["trpo_lane", "grtr_lane", "pred_lane"]
 
         specific_summary = self.specific_data(perf_data, self.num_ctgr)
-        specific_summary.to_csv(op.join(param_path, "specific_summary.csv"), index=False, float_format="%1.4f")
+        specific_summary.to_csv(op.join(param_path, f"specific_summary.csv"), index=False, float_format="%1.4f")
 
     def specific_data(self, data, num_ctgr):
         specific_summary = dict()
@@ -153,8 +177,8 @@ class EvaluateNmsParams:
     def change_data_form(self, data, num_categories):
         dim_one_data = dict()
         dim_two_data = dict()
-        need_key = ["max_box", "iou_thresh", "score_thresh", "recall", "precision", "average_prec", "mean_ap",
-                    "min_perf", "trpo", "grtr", "pred"]
+        need_key = ["max_lane", "iou_thresh", "score_thresh", "recall_lane", "precision_lane", "average_prec", "mean_ap",
+                    "min_perf", "trpo_lane", "grtr_lane", "pred_lane"]
         for key, data in data.items():
             if data.ndim == 1:
                 if key in need_key:
@@ -172,30 +196,27 @@ class FindBestParamByAP:
         pr_curve_{class}.png
     """
 
-    def __init__(self):
+    def __init__(self, trian):
         self.file_dir = op.join(cfg.Paths.CHECK_POINT, cfg.Train.CKPT_NAME)
-        self.filename = self.find_nms_path(self.file_dir)
-        if cfg.ModelOutput.MINOR_CTGR:
-            self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["major"] + cfg.Dataloader.CATEGORY_NAMES["sign"]
-                                + cfg.Dataloader.CATEGORY_NAMES["mark"])
-        else:
-            self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["major"])
+        self.filename = self.find_nms_path(self.file_dir, trian)
 
-    def find_nms_path(self, ckpt_path):
-        param_dir = ckpt_path + "/nms_param"
+        self.num_ctgr = len(cfg.Dataloader.CATEGORY_NAMES["lane"])
+
+    def find_nms_path(self, ckpt_path, trian):
+        param_dir = ckpt_path + f"/nms_param_lane{trian}"
         ckpt_dir = os.listdir(ckpt_path)
-        if "nms_param" in ckpt_dir:
-            return param_dir + "/specific_summary.csv"
+        if f"nms_param_lane{trian}" in ckpt_dir:
+            return param_dir + f"/specific_summary.csv"
         else:
             assert 0, f"not exist {param_dir}"
 
-    def create_all_param_ap(self):
+    def create_all_param_ap(self, trian):
         data = pd.read_csv(self.filename)
         best_params = self.param_summarize(data, self.num_ctgr)
         ap_all_data, mean_ap_all_data, wt_ap_all_data = self.compute_ap_all_class(data, self.num_ctgr)
         total_params = {"best_params": best_params, "ap_data": ap_all_data, "mean_ap_all_data": mean_ap_all_data,
                         "wt_ap_all_data": wt_ap_all_data}
-        self.save_results(total_params)
+        self.save_results(total_params, trian)
 
     def param_summarize(self, data, num_ctgr):
         params = pd.DataFrame()
@@ -208,14 +229,14 @@ class FindBestParamByAP:
         return params
 
     def compute_ap_all_class(self, data, num_ctgr):
-        max_out_vals = data["max_box"].unique()
+        max_out_vals = data["max_lane"].unique()
         iou_vals = data["iou_thresh"].unique()
         ap_outputs = []
         for max_out in max_out_vals:
             for iou in iou_vals:
                 for ctgr in range(num_ctgr):
-                    ap_out = {"max_box": max_out, "iou_thresh": iou, "class": ctgr}
-                    ap_out["ap"], ap_out["grtr"] = self.compute_ap(data, max_out, iou, ctgr)
+                    ap_out = {"max_lane": max_out, "iou_thresh": iou, "class": ctgr}
+                    ap_out["ap"], ap_out["grtr_lane"] = self.compute_ap(data, max_out, iou, ctgr)
                     ap_outputs.append(ap_out)
         ap_outputs = pd.DataFrame(ap_outputs)
 
@@ -223,8 +244,8 @@ class FindBestParamByAP:
         wt_ap_outputs = []
         for max_out in max_out_vals:
             for iou in iou_vals:
-                mean_ap_out = {"max_box": max_out, "iou_thresh": iou}
-                wt_ap_out = {"max_box": max_out, "iou_thresh": iou}
+                mean_ap_out = {"max_lane": max_out, "iou_thresh": iou}
+                wt_ap_out = {"max_lane": max_out, "iou_thresh": iou}
                 mean_ap_out["mean_ap"], wt_ap_out["wt_ap"] = self.compute_mean_ap(ap_outputs, max_out, iou)
                 mean_ap_outputs.append(mean_ap_out)
                 wt_ap_outputs.append(wt_ap_out)
@@ -233,63 +254,63 @@ class FindBestParamByAP:
         return ap_outputs, mean_ap_outputs, wt_ap_outputs
 
     def compute_ap(self, data, max_out, iou, ctgr):
-        mask = (data['iou_thresh'] == iou) & (data['max_box'] == max_out) & (data['class'] == ctgr)
+        mask = (data['iou_thresh'] == iou) & (data['max_lane'] == max_out) & (data['class'] == ctgr)
         data = data.loc[mask, :]
         data = data.reset_index()
-        apdata = data.loc[:, ["recall", "precision", "grtr"]]
-        apdata = apdata.sort_values(by="recall")
+        apdata = data.loc[:, ["recall_lane", "precision_lane", "grtr_lane"]]
+        apdata = apdata.sort_values(by="recall_lane")
         apdata = apdata.reset_index()
         length = apdata.shape[0]
-        max_pre = apdata["precision"].copy()
+        max_pre = apdata["precision_lane"].copy()
         for score in range(length - 2, -1, -1):
             max_pre[score] = np.maximum(max_pre[score], max_pre[score + 1])
         ap = 0
-        recall = apdata["recall"]
+        recall = apdata["recall_lane"]
         precision = max_pre
         for i in range(apdata.shape[0] - 1):
             ap += (recall[i + 1] - recall[i]) * precision[i + 1]
-        return ap, apdata["grtr"].sum()
+        return ap, apdata["grtr_lane"].sum()
 
     def compute_mean_ap(self, data, max_out, iou):
-        mask = (data['iou_thresh'] == iou) & (data['max_box'] == max_out)
+        mask = (data['iou_thresh'] == iou) & (data['max_lane'] == max_out)
         data = data.loc[mask, :]
         data = data.reset_index()
-        grtr_num = data["grtr"]
+        grtr_num = data["grtr_lane"]
         ap = data["ap"]
         wt_ap = np.sum(ap * grtr_num) / np.sum(grtr_num)
         mean_ap = np.mean(ap, axis=0)
         return mean_ap, wt_ap
 
-    def save_results(self, total_params):
+    def save_results(self, total_params, trian):
         for key, data in total_params.items():
-            data.to_csv(op.join(self.file_dir, f"nms_param/{key}.csv"), index=False, float_format="%1.4f")
+            data.to_csv(op.join(self.file_dir, f"nms_param_lane{trian}/{key}.csv"), index=False, float_format="%1.4f")
 
-    def draw_main(self, max_box=None, iou_thresh=None):
+    def draw_main(self, max_lane=None, iou_thresh=None):
         data = pd.read_csv(self.filename)
-        nms_param_dir = self.file_dir + "/nms_param"
-        if iou_thresh is None and max_box is None:
+        nms_param_dir = self.file_dir + "/nms_param_lane"
+        if iou_thresh is None and max_lane is None:
             iou_thresh = data["iou_thresh"].unique()
-            max_box = data["max_box"].unique()
-        elif max_box is None:
-            max_box = data["max_box"].unique()
+            max_lane = data["max_lane"].unique()
+        elif max_lane is None:
+            max_lane = data["max_lane"].unique()
         elif iou_thresh is None:
             iou_thresh = data["iou_thresh"].unique()
         ap_outputs = []
-        for max_out in max_box:
+        for max_out in max_lane:
             for iou in iou_thresh:
                 for ctgr in range(self.num_ctgr):
-                    ap_out = {"max_box": max_out, "iou_thresh": iou, "class": ctgr}
-                    ap_out["ap"], ap_out["grtr"] = self.compute_ap(data, max_out, iou, ctgr)
+                    ap_out = {"max_lane": max_out, "iou_thresh": iou, "class": ctgr}
+                    ap_out["ap"], ap_out["grtr_lane"] = self.compute_ap(data, max_out, iou, ctgr)
                     self.draw_select_ap_curve(data, max_out, iou, ctgr)
                     ap_outputs.append(ap_out)
         ap_outputs = pd.DataFrame(ap_outputs)
 
         mean_ap_outputs = []
         wt_ap_outputs = []
-        for max_out in max_box:
+        for max_out in max_lane:
             for iou in iou_thresh:
-                mean_ap_out = {"max_box": max_out, "iou_thresh": iou}
-                wt_ap_out = {"max_box": max_out, "iou_thresh": iou}
+                mean_ap_out = {"max_lane": max_out, "iou_thresh": iou}
+                wt_ap_out = {"max_lane": max_out, "iou_thresh": iou}
                 mean_ap_out["mean_ap"], wt_ap_out["wt_ap"] = self.compute_mean_ap(ap_outputs, max_out, iou)
                 mean_ap_outputs.append(mean_ap_out)
                 wt_ap_outputs.append(wt_ap_out)
@@ -301,22 +322,22 @@ class FindBestParamByAP:
         wt_ap_outputs.to_csv(op.join(nms_param_dir, f"select_wt_ap.csv"), index=False, float_format="%1.4f")
 
     def draw_select_ap_curve(self, data, select_max_out, select_iou, category):
-        mask = (data['iou_thresh'] == select_iou) & (data['max_box'] == select_max_out) & (data['class'] == category)
+        mask = (data['iou_thresh'] == select_iou) & (data['max_lane'] == select_max_out) & (data['class'] == category)
         data = data.loc[mask, :]
         data = data.reset_index()
-        data = data.loc[:, ["recall", "precision"]]
-        data = data.sort_values(by="recall")
+        data = data.loc[:, ["recall_lane", "precision_lane"]]
+        data = data.sort_values(by="recall_lane")
         data = data.reset_index()
         length = data.shape[0]
-        max_pre = data["precision"].copy()
+        max_pre = data["precision_lane"].copy()
         for score in range(length - 2, -1, -1):
             max_pre[score] = np.maximum(max_pre[score], max_pre[score + 1])
         data["max_pre"] = max_pre
         name_suff = f"{select_max_out}_{select_iou}"
-        self.draw_ap_curve(data["recall"], data["precision"], data["max_pre"], category, name_suff)
+        self.draw_ap_curve(data["recall_lane"], data["precision_lane"], data["max_pre"], category, name_suff)
 
     def draw_ap_curve(self, recall, precision, max_pre, ctgr, name_suff):
-        image_dir = self.file_dir + "/nms_param/curve_image"
+        image_dir = self.file_dir + "/nms_param_lane/curve_image"
         if not op.isdir(image_dir):
             os.makedirs(image_dir, exist_ok=True)
         plt.subplot(121)
@@ -344,8 +365,9 @@ if __name__ == "__main__":
     eval_param = EvaluateNmsParams()
     eval_param.create_eval_file()
     # TODO ap check
-    param_optimizer = FindBestParamByAP()
-    param_optimizer.create_all_param_ap()
+    param_optimizer = FindBestParamByAP("")
+    param_optimizer.create_all_param_ap("")
+    param_optimizer_train = FindBestParamByAP("_train")
+    param_optimizer_train.create_all_param_ap("_train")
     # param_optimizer.draw_main([11, 12, 13], [0.3, 0.4])
     print("end optimizer")
-

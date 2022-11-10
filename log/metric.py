@@ -3,7 +3,8 @@ import utils.framework.util_function as uf
 import config as cfg
 
 
-def count_true_positives(grtr, pred, grtr_dontcare, num_ctgr, iou_thresh=cfg.Validation.TP_IOU_THRESH, per_class=False):
+def count_true_positives(grtr, pred, grtr_dontcare, num_ctgr, iou_thresh=cfg.Validation.TP_IOU_THRESH, per_class=False,
+                         num_sign_ctgr=None, num_mark_ctgr=None):
     """
     :param grtr: slices of features["bboxes"] {'yxhw': (batch, N, 4), 'category': (batch, N)}
     :param grtr_dontcare: slices of features["dontcare"] {'yxhw': (batch, N, 4), 'category': (batch, N)}
@@ -11,6 +12,7 @@ def count_true_positives(grtr, pred, grtr_dontcare, num_ctgr, iou_thresh=cfg.Val
     :param num_ctgr: number of categories
     :param iou_thresh: threshold to determine whether two boxes are overlapped
     :param per_class
+    :param num_minor_ctgr
     :return:
     """
     splits = split_true_false(grtr, pred, grtr_dontcare, iou_thresh)
@@ -19,13 +21,50 @@ def count_true_positives(grtr, pred, grtr_dontcare, num_ctgr, iou_thresh=cfg.Val
     grtr_valid_fn = splits["grtr_fn"]["yxhw"][..., 2:3] > 0
     pred_valid_tp = splits["pred_tp"]["yxhw"][..., 2:3] > 0
     pred_valid_fp = splits["pred_fp"]["yxhw"][..., 2:3] > 0
+    if cfg.ModelOutput.MINOR_CTGR:
+        grtr_valid_sign_tp = np.where(((grtr_valid_tp > 0) * (splits["grtr_tp"]["category"][..., :1] == 8)),
+                                      splits["grtr_tp"]["minor_ctgr"][..., :1], -1) >= 0
+        grtr_valid_mark_tp = np.where(((grtr_valid_tp > 0) * (splits["grtr_tp"]["category"][..., :1] == 9)),
+                                      splits["grtr_tp"]["minor_ctgr"][..., :1], -1) >= 0
+
+        grtr_valid_sign_fn = np.where(((grtr_valid_fn > 0) * (splits["grtr_fn"]["category"][..., :1] == 8)),
+                                      splits["grtr_fn"]["minor_ctgr"][..., :1], -1) >= 0
+        grtr_valid_mark_fn = np.where(((grtr_valid_fn > 0) * (splits["grtr_fn"]["category"][..., :1] == 9)),
+                                      splits["grtr_fn"]["minor_ctgr"][..., :1], -1) >= 0
+
+        pred_valid_sign_tp = np.where(((pred_valid_tp > 0) * (splits["pred_tp"]["category"][..., :1] == 8)),
+                                      splits["pred_tp"]["minor_ctgr"][..., :1], -1) >= 0
+        pred_valid_mark_tp = np.where(((pred_valid_tp > 0) * (splits["pred_tp"]["category"][..., :1] == 9)),
+                                      splits["pred_tp"]["minor_ctgr"][..., :1], -1) >= 0
+
+        pred_valid_sign_fp = np.where(((pred_valid_fp > 0) * (splits["pred_fp"]["category"][..., :1] == 9)),
+                                      splits["pred_fp"]["minor_ctgr"][..., :1], -1) >= 0
+        pred_valid_mark_fp = np.where(((pred_valid_fp > 0) * (splits["pred_fp"]["category"][..., :1] == 10)),
+                                      splits["pred_fp"]["minor_ctgr"][..., :1], -1) >= 0
 
     if per_class:
         grtr_tp_count = count_per_class(splits["grtr_tp"], grtr_valid_tp, num_ctgr)
         grtr_fn_count = count_per_class(splits["grtr_fn"], grtr_valid_fn, num_ctgr)
         pred_tp_count = count_per_class(splits["pred_tp"], pred_valid_tp, num_ctgr)
         pred_fp_count = count_per_class(splits["pred_fp"], pred_valid_fp, num_ctgr)
+        if cfg.ModelOutput.MINOR_CTGR:
+            grtr_sign_tp_count = count_per_minor_class(splits["grtr_tp"], grtr_valid_sign_tp, num_sign_ctgr)
+            grtr_sign_fn_count = count_per_minor_class(splits["grtr_fn"], grtr_valid_sign_fn, num_sign_ctgr)
+            pred_sign_tp_count = count_per_minor_class(splits["pred_tp"], pred_valid_sign_tp, num_sign_ctgr)
+            pred_sign_fp_count = count_per_minor_class(splits["pred_fp"], pred_valid_sign_fp, num_sign_ctgr)
 
+            grtr_mark_tp_count = count_per_minor_class(splits["grtr_tp"], grtr_valid_mark_tp, num_mark_ctgr)
+            grtr_mark_fn_count = count_per_minor_class(splits["grtr_fn"], grtr_valid_mark_fn, num_mark_ctgr)
+            pred_mark_tp_count = count_per_minor_class(splits["pred_tp"], pred_valid_mark_tp, num_mark_ctgr)
+            pred_mark_fp_count = count_per_minor_class(splits["pred_fp"], pred_valid_mark_fp, num_mark_ctgr)
+            return {"trpo": pred_tp_count, "grtr": (grtr_tp_count + grtr_fn_count),
+                    "pred": (pred_tp_count + pred_fp_count), "sign_trpo": pred_sign_tp_count,
+                    "sign_grtr": (grtr_sign_tp_count + grtr_sign_fn_count),
+                    "sign_pred": (pred_sign_tp_count + pred_sign_fp_count),
+                    "mark_trpo": pred_mark_tp_count,
+                    "mark_grtr": (grtr_mark_tp_count + grtr_mark_fn_count),
+                    "mark_pred": (pred_mark_tp_count + pred_mark_fp_count)
+                    }
         return {"trpo": pred_tp_count, "grtr": (grtr_tp_count + grtr_fn_count),
                 "pred": (pred_tp_count + pred_fp_count)}
     else:
@@ -72,6 +111,8 @@ def split_tp_fp_fn(pred, grtr, iou_thresh):
     valid_mask = grtr["object"]
     iou = uf.compute_iou_general(grtr["yxhw"], pred["yxhw"]).numpy()  # (batch, N, M)
 
+    # ctgr_mask = grtr["category"][:, :, np.newaxis, 0] == pred["category"][:, np.newaxis, :, 0]
+    # iou_ctgr = iou * ctgr_mask
     best_iou = np.max(iou, axis=-1)  # (batch, N)
 
     best_idx = np.argmax(iou, axis=-1)  # (batch, N)
@@ -79,7 +120,7 @@ def split_tp_fp_fn(pred, grtr, iou_thresh):
         iou_thresh = get_iou_thresh_per_class(grtr["category"], iou_thresh)
     iou_match = best_iou > iou_thresh  # (batch, N)
 
-    pred_ctgr_aligned = numpy_gather(pred["category"], best_idx, 1)  # (batch, N, 8)
+    pred_ctgr_aligned = numpy_gather(pred["category"], best_idx, 1)  # (batch, N)
 
     ctgr_match = grtr["category"][..., 0] == pred_ctgr_aligned  # (batch, N)
     grtr_tp_mask = np.expand_dims(iou_match * ctgr_match, axis=-1)  # (batch, N, 1)
@@ -153,6 +194,33 @@ def count_per_class(boxes, mask, num_ctgr):
     return boxes_count
 
 
+def count_per_minor_class(boxes, mask, num_minor_ctgr):
+    """
+    :param boxes: slices of object info {'yxhw': (batch, N, 4), 'category': (batch, N), ...}
+    :param mask: binary validity mask (batch, N')
+    :param num_ctgr: number of categories
+    :return: per-class object counts
+    """
+
+    boxes_ctgr = boxes["minor_ctgr"][..., 0].astype(np.int32)  # (batch, N')
+    boxes_onehot = one_hot(boxes_ctgr, num_minor_ctgr) * mask
+    boxes_count = np.sum(boxes_onehot, axis=(0, 1))
+    return boxes_count
+
+
+def count_per_lane_class(lanes, mask, num_ctgr):
+    """
+    :param lanes: slices of object info {'lanes': (batch, N, 10), 'lane_category': (batch, N), ...}
+    :param mask: binary validity mask (batch, N')
+    :param num_ctgr: number of categories
+    :return: per-class object counts
+    """
+    lanes_ctgr = lanes["lane_category"][..., 0].astype(np.int32)  # (batch, N')
+    lanes_onehot = one_hot(lanes_ctgr, num_ctgr) * mask
+    lanes_count = np.sum(lanes_onehot, axis=(0, 1))
+    return lanes_count
+
+
 def one_hot(grtr_category, category_shape):
     one_hot_data = np.eye(category_shape)[grtr_category.astype(np.int32)]
     return one_hot_data
@@ -170,4 +238,65 @@ def numpy_gather(params, index, dim=0):
     else:
         gathar_param = np.take(params, index)
     return gathar_param
+
+
+def count_true_positives_lane(grtr, pred, num_ctgr, img_shape, iou_thresh=cfg.Validation.LANE_TP_IOU_THRESH,
+                              per_class=False, is_train=True):
+    splits = split_lane_true_false(grtr, pred, iou_thresh, img_shape, is_train)
+
+    grtr_valid_tp = splits["grtr_tp"]["lane_fpoints"][..., 1:2] > 0
+    grtr_valid_fn = splits["grtr_fn"]["lane_fpoints"][..., 1:2] > 0
+    pred_valid_tp = splits["pred_tp"]["lane_fpoints"][..., 1:2] > 0
+    pred_valid_fp = splits["pred_fp"]["lane_fpoints"][..., 1:2] > 0
+    if per_class:
+        grtr_tp_count = count_per_lane_class(splits["grtr_tp"], grtr_valid_tp, num_ctgr)
+        grtr_fn_count = count_per_lane_class(splits["grtr_fn"], grtr_valid_fn, num_ctgr)
+        pred_tp_count = count_per_lane_class(splits["pred_tp"], pred_valid_tp, num_ctgr)
+        pred_fp_count = count_per_lane_class(splits["pred_fp"], pred_valid_fp, num_ctgr)
+        return {"trpo_lane": pred_tp_count, "grtr_lane": (grtr_tp_count + grtr_fn_count),
+                "pred_lane": (pred_tp_count + pred_fp_count)}
+    else:
+        grtr_count = np.sum(grtr_valid_tp + grtr_valid_fn)
+        pred_count = np.sum(pred_valid_tp + pred_valid_fp)
+        trpo_count = np.sum(pred_valid_tp)
+        return {"trpo_lane": trpo_count, "grtr_lane": grtr_count, "pred_lane": pred_count}
+
+
+def split_lane_true_false(grtr, pred, iou_thresh, img_shape, is_train):
+    splits = split_lane_tp_fp_fn(pred, grtr, iou_thresh, img_shape, is_train)
+    return splits
+
+
+def split_lane_tp_fp_fn(pred, grtr, iou_thresh, img_shape, is_train):
+    batch, M, _ = pred["lane_category"].shape
+    valid_mask = grtr["lane_centerness"]
+
+    if is_train:
+        iou = uf.compute_lane_iou(grtr["lane_fpoints"], pred["lane_fpoints"])  # (batch, N, M)
+    else:
+        iou = uf.compute_lane_iou_with_cv2(grtr["lane_fpoints"], pred["lane_fpoints"], img_shape)  # (batch, N, M)
+    best_iou = np.max(iou, axis=-1)  # (batch, N)
+    best_idx = np.argmax(iou, axis=-1)  # (batch, N)
+
+    if len(iou_thresh) > 1:
+        iou_thresh = get_iou_thresh_per_class(grtr["lane_category"], iou_thresh)
+    iou_match = best_iou > iou_thresh  # (batch, N)
+
+    pred_ctgr_aligned = numpy_gather(pred["lane_category"], best_idx, 1)  # (batch, N, 8)
+
+    ctgr_match = grtr["lane_category"][..., 0] == pred_ctgr_aligned  # (batch, N)
+    grtr_tp_mask = np.expand_dims(iou_match * ctgr_match, axis=-1)  # (batch, N, 1)
+
+    grtr_fn_mask = ((1 - grtr_tp_mask) * valid_mask).astype(np.float32)  # (batch, N, 1)
+    grtr_tp = {key: val * grtr_tp_mask for key, val in grtr.items()}
+    grtr_fn = {key: val * grtr_fn_mask for key, val in grtr.items()}
+    grtr_tp["iou"] = best_iou * grtr_tp_mask[..., 0]
+    grtr_fn["iou"] = best_iou * grtr_fn_mask[..., 0]
+
+    pred_tp_mask = indices_to_binary_mask(best_idx, grtr_tp_mask, M)
+    pred_fp_mask = 1 - pred_tp_mask  # (batch, M, 1)
+    pred_tp = {key: val * pred_tp_mask for key, val in pred.items()}
+    pred_fp = {key: val * pred_fp_mask for key, val in pred.items()}
+    return {"pred_tp": pred_tp, "pred_fp": pred_fp, "grtr_tp": grtr_tp, "grtr_fn": grtr_fn}
+
 

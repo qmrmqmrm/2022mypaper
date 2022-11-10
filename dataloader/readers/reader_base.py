@@ -37,30 +37,9 @@ class DatasetReaderBase:
         """
         raise NotImplementedError()
 
-    def get_2d_box(self, index, raw_hw_shape=None):
+    def get_bboxes(self, index):
         """
         :param index: image index in self.frame_names
         :return: bounding box in the indexed image (y, x, h, w, category_index), np.int32
         """
-        pass
-
-    def get_3d_box(self, index):
-        """
-        :param index: image index in self.frame_names
-        :return: bounding 3Dbox in the indexed image (y, x, l, w, z, h, yaw), np.float32
-        """
-        pass
-
-    def get_point_cloud(self, index):
-        """
-        :param index: image index in self.frame_names
-        :return:
-        """
-        pass
-
-    def get_depth_map(self, index):
-        """
-        :param index: image index in self.frame_names
-        :return:
-        """
-        pass
+        raise NotImplementedError()

@@ -20,7 +20,7 @@ class ModelFactory:
                  neck_conv_args=cfg.Architecture.NECK_CONV_ARGS,
                  head_conv_args=cfg.Architecture.HEAD_CONV_ARGS,
                  num_anchors_per_scale=cfg.ModelOutput.NUM_ANCHORS_PER_SCALE,
-                 pred_composition=cfg.ModelOutput.PRED_HEAD_COMPOSITION,
+                 head_composition=cfg.ModelOutput.HEAD_COMPOSITION,
                  num_lane_anchors_per_scale=cfg.ModelOutput.NUM_LANE_ANCHORS_PER_SCALE,
                  out_channels=cfg.ModelOutput.NUM_MAIN_CHANNELS,
                  lane_out_channels=cfg.ModelOutput.NUM_LANE_CHANNELS,
@@ -37,7 +37,7 @@ class ModelFactory:
         self.head_conv_args = head_conv_args
         self.num_anchors_per_scale = num_anchors_per_scale
         self.num_lane_anchors_per_scale = num_lane_anchors_per_scale
-        self.pred_composition = pred_composition
+        self.head_composition = head_composition
         self.out_channels = out_channels
         self.lane_out_channels = lane_out_channels
         self.training = training
@@ -50,28 +50,31 @@ class ModelFactory:
         neck_model = neck.neck_factory(self.neck_name, self.neck_conv_args, self.training,
                                        self.num_anchors_per_scale, self.out_channels,
                                        self.num_lane_anchors_per_scale, self.lane_out_channels)
-        head_model = head.head_factory(self.head_name, self.head_conv_args, self.training, self.num_anchors_per_scale, self.pred_composition,
-                                       self.num_lane_anchors_per_scale, self.lane_out_channels)
+        head_model = head.head_factory(self.head_name, self.head_conv_args, self.training, self.num_anchors_per_scale,
+                                       self.head_composition, self.num_lane_anchors_per_scale, self.lane_out_channels)
 
         input_tensor = tf.keras.layers.Input(shape=self.input_shape, batch_size=self.batch_size)
-
         backbone_features = backbone_model(input_tensor)
         neck_features = neck_model(backbone_features)
-
         head_features = head_model(neck_features)
 
-        output_features = {"inst": {}, "feat": [], "raw_feat": []}
-        decode_features = decoder.FeatureDecoder(self.anchors_per_scale)
-        feature_scales = [scale for scale in head_features.keys() if "feature" in scale]
-        for i, scale in enumerate(feature_scales):
-            output_features["feat"].append(decode_features(head_features[scale], i))
-            if cfg.ModelOutput.FEAT_RAW:
-                output_features["raw_feat"].append(head_features[scale])
-                # output_features["backraw"].append(backbone_features[scale])
+        output_features = {}
+        feature_decoder = decoder.FeatureDecoder(self.anchors_per_scale)
+        feat_box_logit = head_features[:-1] if cfg.ModelOutput.LANE_DET else head_features
+        feat_box_logit = uf.merge_and_slice_features(feat_box_logit, False, "feat_box")
+        output_features["feat_box"] = feature_decoder(feat_box_logit)
 
         if cfg.ModelOutput.LANE_DET:
-            decode_lane_features = decoder.FeatureLaneDecoder()
-            output_features["feat_lane"] = decode_lane_features(head_features["feat_lane"])
+            lane_decoder = decoder.FeatureLaneDecoder()
+            output_features["feat_lane_logit"] = uf.merge_and_slice_features(head_features[-1:], False, "feat_lane")
+            output_features["feat_lane"] = lane_decoder(output_features["feat_lane_logit"])
+
+        for key in output_features.keys():
+            for slice_key in output_features[key].keys():
+                if slice_key != "whole":
+                    for scale_index in range(len(output_features[key][slice_key])):
+                        output_features[key][slice_key][scale_index] = uf.merge_dim_hwa(
+                            output_features[key][slice_key][scale_index])
 
         yolo_model = tf.keras.Model(inputs=input_tensor, outputs=output_features, name="yolo_model")
         return yolo_model

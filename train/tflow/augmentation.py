@@ -7,24 +7,26 @@ import utils.framework.util_function as uf
 
 
 def augmentation_factory(augment_probs=None):
-    augment_probs = augment_probs if augment_probs else dict()
-    augmenters = []
-    for key, prob in augment_probs.items():
-        if key == "ColorJitter":
-            augmenters.append(A.ColorJitter(brightness=0.6, contrast=0.6, saturation=0.6, hue=0, p=prob))
-        elif key == "Flip":
-            augmenters.append(A.HorizontalFlip(p=prob))
-        elif key == "CropResize":
-            augmenters.append(A.OneOf([A.RandomSizedCrop((256, 512), 512, 1280, w2h_ratio=2.5, p=prob),
-                              A.RandomScale((-0.5, -0.5), p=prob)], p=1.0))
-        elif key == "Blur":
-            augmenters.append(A.Blur(p=prob))
-    augmenters.append(A.PadIfNeeded(512, 1280, border_mode=0, value=0, always_apply=True))
-    aug_func = A.Compose(augmenters, bbox_params=A.BboxParams(format="yolo", min_visibility=0.5,
-                                                              label_fields=["remainder", "dont_remainder"]),
-                         additional_targets={"dontbbox": "dontbbox"})
-    # "remainder" mean object, class, minor_class, distance. except bbox coord
-    total_augment = TotalAugment(aug_func)
+    if augment_probs:
+        augmenters = []
+        for key, prob in augment_probs.items():
+            if key == "ColorJitter":
+                augmenters.append(A.ColorJitter(brightness=0.6, contrast=0.6, saturation=0.6, hue=0, p=prob))
+            elif key == "Flip":
+                augmenters.append(A.HorizontalFlip(p=prob))
+            elif key == "CropResize":
+                augmenters.append(A.OneOf([A.RandomSizedCrop((256, 512), 512, 1280, w2h_ratio=2.5, p=prob),
+                                  A.RandomScale((-0.5, -0.5), p=prob)], p=1.0))
+            elif key == "Blur":
+                augmenters.append(A.Blur(p=prob))
+        augmenters.append(A.PadIfNeeded(512, 1280, border_mode=0, value=0, always_apply=True))
+        aug_func = A.Compose(augmenters, bbox_params=A.BboxParams(format="yolo", min_visibility=0.5,
+                                                                  label_fields=["remainder", "dont_remainder"]),
+                             additional_targets={"dontbbox": "dontbbox"})
+        # "remainder" mean object, class, minor_class, distance. except bbox coord
+        total_augment = TotalAugment(aug_func)
+    else:
+        total_augment = None
     return total_augment
 
 
@@ -37,27 +39,39 @@ class TotalAugment:
         total_image = []
         total_bboxes = []
         total_dontcare = []
-        for i in range(cfg.Train.DATA_BATCH_SIZE):
+        total_lane = []
+        total_lpoint = []
+        batch_size = features["image"].shape[0]
+        for i in range(batch_size):
             image = features["image"][i].numpy()
-            bboxes = features["bboxes"][i]
-            dontbboxes = features["dontcare"][i]
-            raw_data = self.preprocess(image, bboxes, dontbboxes)
+            inst_box = features["inst_box"][i]
+            inst_dc = features["inst_dc"][i]
+            lanes_point = features["lanes_point"][i]
+            inst_lane = features["inst_lane"][i]
+            raw_data = self.preprocess(image, inst_box, inst_dc, lanes_point, inst_lane)
             aug_data = self.transformation(raw_data)
             aug_data = self.post_process(aug_data)
+            aug_lpoint = tf.zeros_like(lanes_point)[np.newaxis, ...]
+            aug_inst_lane = tf.zeros_like(inst_lane)[np.newaxis, ...]
+
             total_image.extend([image[np.newaxis, ...], aug_data["image"]])
-            total_bboxes.extend([bboxes[np.newaxis, ...], aug_data["total_bboxes"]])
-            total_dontcare.extend([dontbboxes[np.newaxis, ...], aug_data["total_dontbbox"]])
+            total_bboxes.extend([inst_box[np.newaxis, ...], aug_data["total_inst_box"]])
+            total_dontcare.extend([inst_dc[np.newaxis, ...], aug_data["total_inst_dc"]])
+            total_lane.extend([inst_lane[np.newaxis, ...], aug_inst_lane])
+            total_lpoint.extend([lanes_point[np.newaxis, ...], aug_lpoint])
         features["image"] = tf.convert_to_tensor(np.concatenate(total_image, axis=0), dtype=tf.float32)
-        features["bboxes"] = tf.convert_to_tensor(np.concatenate(total_bboxes, axis=0), dtype=tf.float32)
-        features["dontcare"] = tf.convert_to_tensor(np.concatenate(total_dontcare, axis=0), dtype=tf.float32)
+        features["inst_box"] = tf.convert_to_tensor(np.concatenate(total_bboxes, axis=0), dtype=tf.float32)
+        features["inst_dc"] = tf.convert_to_tensor(np.concatenate(total_dontcare, axis=0), dtype=tf.float32)
+        features["lanes_point"] = tf.convert_to_tensor(np.concatenate(total_lpoint, axis=0), dtype=tf.float32)
+        features["inst_lane"] = tf.convert_to_tensor(np.concatenate(total_lane, axis=0), dtype=tf.float32)
         return features
 
-    def preprocess(self, image, bboxes, dontbboxes):
+    def preprocess(self, image, inst_box, inst_dc, lanes_points, inst_lane):
         data = {"image": image}
-        yxhw = uf.convert_tensor_to_numpy(bboxes[:, :4])
-        remainder = uf.convert_tensor_to_numpy(bboxes[:, 4:])
-        dontbbox = uf.convert_tensor_to_numpy(dontbboxes[:, :4])
-        dont_remainder = uf.convert_tensor_to_numpy(dontbboxes[:, 4:])
+        yxhw = uf.convert_tensor_to_numpy(inst_box[:, :4])
+        remainder = uf.convert_tensor_to_numpy(inst_box[:, 4:])
+        dontbbox = uf.convert_tensor_to_numpy(inst_dc[:, :4])
+        dont_remainder = uf.convert_tensor_to_numpy(inst_dc[:, 4:])
         valid_mask = yxhw[:, 2] > 0
         yxhw = yxhw[valid_mask, :]
         dontbbox = dontbbox[valid_mask, :]
@@ -118,6 +132,7 @@ class TotalAugment:
                                                   dtype=np.float32)
             aug_data["dontbbox"][:dontbbox.shape[0]] = dontbbox
             aug_data["dont_remainder"][:dont_remain.shape[0]] = dont_remain
+
         elif len(aug_data["bboxes"]) == 0:
             # TODO fix hard code
             aug_data["bboxes"] = np.zeros_like((self.max_bbox, 5), dtype=np.float32)
@@ -134,7 +149,7 @@ class TotalAugment:
 
         bbox_total_labels = np.concatenate([aug_data["bboxes"], aug_data["remainder"]], axis=-1)
         dont_total_labels = np.concatenate([aug_data["dontbbox"], aug_data["dont_remainder"]], axis=-1)
-        aug_data["total_bboxes"] = tf.convert_to_tensor(bbox_total_labels, dtype=tf.float32)[np.newaxis, ...]
-        aug_data["total_dontbbox"] = tf.convert_to_tensor(dont_total_labels, dtype=tf.float32)[np.newaxis, ...]
+        aug_data["total_inst_box"] = tf.convert_to_tensor(bbox_total_labels, dtype=tf.float32)[np.newaxis, ...]
+        aug_data["total_inst_dc"] = tf.convert_to_tensor(dont_total_labels, dtype=tf.float32)[np.newaxis, ...]
         return aug_data
 

@@ -2,6 +2,7 @@ import os.path as op
 import numpy as np
 from matplotlib import pyplot as plt
 
+import config_dir.config_generator as cg
 import config as cfg
 from dataloader.framework.dataset_reader import DatasetReader
 
@@ -9,7 +10,7 @@ from dataloader.framework.dataset_reader import DatasetReader
 def get_dataset(split):
     reader = DatasetReader(op.join(cfg.Paths.DATAPATH, split))
     dataset = reader.get_dataset()
-    tfr_cfg = reader.get_tfr_config()
+    tfr_cfg = reader.get_dataset_config()
     image_shape = tfr_cfg["image"]["shape"]
     return dataset, image_shape
 
@@ -18,10 +19,10 @@ def plot_hws(dataset):
     total_hs = []
     total_ws = []
     for feature in dataset:
-        height = feature["bboxes"][..., 2].numpy()
-        width = feature["bboxes"][..., 3].numpy()
-        center_x = feature["bboxes"][..., 1].numpy()
-        center_y = feature["bboxes"][..., 0].numpy()
+        height = feature["inst_box"][..., 2].numpy()
+        width = feature["inst_box"][..., 3].numpy()
+        center_x = feature["inst_box"][..., 1].numpy()
+        center_y = feature["inst_box"][..., 0].numpy()
         xmin = np.maximum(center_x - width / 2, 0)
         xmax = np.minimum(center_x + width / 2, 1)
         ymin = np.maximum(center_y - height / 2, 0)
@@ -60,7 +61,7 @@ def log_tfrecord():
         dataset, image_shape = get_dataset(tfr)
         datasets.append(dataset)
 
-    anchor = np.array([[[43.0, 51.0], [123.0, 53.0], [77.0, 128.0]], [[51.0, 323.0], [254.0, 113.0], [165.0, 229.0]], [[85.0, 692.0], [92.0, 1079.0], [282.0, 395.0]]])
+    anchor = cfg.AnchorGeneration.ANCHORS
     dataset_h = []
     dataset_w = []
     for dataset in datasets:
