@@ -20,6 +20,8 @@ class VisualLog:
             os.makedirs(self.visual_heatmap_path)
         self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, "test")
         self.image_files.sort()
+        self.y_axis = np.arange(600, 200, -10)
+        self.crop_tlbr = cfg.Datasets.DATASET_CONFIG.CROP_TLBR
         self.categories = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["major"])}
         self.sign_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["sign"])}
         self.mark_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["mark"])}
@@ -59,16 +61,13 @@ class VisualLog:
             splits_lane = split_lane_true_false(grtr["inst_lane"], pred["inst_lane"],
                                                 cfg.Validation.LANE_TP_IOU_THRESH, grtr['image'].shape[1:3],
                                                 is_train=False)
-
         batch = cfg.Train.DATA_BATCH_SIZE
 
         for i in range(batch):
             # grtr_log_keys = ["pred_object", "pred_ctgr_prob", "pred_score", "distance"]
             image_file = self.image_files[step * batch + i]
             image_grtr_orgin = cv2.imread(image_file)
-            # image_grtr = cv2.imread(image_file)
             image_pred_orgin = cv2.imread(image_file)
-            # image_pred = cv2.imread(image_file)
             image_grtr = uf.to_uint8_image(grtr["image"][i]).numpy()
             image_pred = uf.to_uint8_image(grtr["image"][i]).numpy()
             if cfg.ModelOutput.BOX_DET:
@@ -96,15 +95,13 @@ class VisualLog:
             if cfg.ModelOutput.LANE_DET:
                 image_grtr = self.draw_lanes(image_grtr, splits_lane['grtr_tp'], i, (0, 255, 0))
                 image_grtr = self.draw_lanes(image_grtr, splits_lane['grtr_fn'], i, (0, 0, 255))
-
-                image_grtr_orgin = self.draw_lanes(image_grtr_orgin, splits_lane['grtr_tp'], i, (0, 255, 0))
-                image_grtr_orgin = self.draw_lanes(image_grtr_orgin, splits_lane['grtr_fn'], i, (0, 0, 255))
+                image_grtr_orgin = self.draw_30_lanes(image_grtr_orgin, splits_lane['grtr_tp'], i, (0, 255, 255), image_grtr.shape)
+                image_grtr_orgin = self.draw_30_lanes(image_grtr_orgin, splits_lane['grtr_fn'], i, (255, 0, 255), image_grtr.shape)
 
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_tp"], i, (0, 255, 0))
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_fp"], i, (0, 0, 255))
-
-                image_pred_orgin = self.draw_lanes(image_pred_orgin, splits_lane["pred_tp"], i, (0, 255, 0))
-                image_pred_orgin = self.draw_lanes(image_pred_orgin, splits_lane["pred_fp"], i, (0, 0, 255))
+                image_pred_orgin = self.draw_30_lanes(image_pred_orgin, splits_lane["pred_tp"], i, (0, 255, 0), image_grtr.shape)
+                image_pred_orgin = self.draw_30_lanes(image_pred_orgin, splits_lane["pred_fp"], i, (0, 0, 255), image_grtr.shape)
 
             if self.visual_heatmap_path:
                 image_zero = uf.to_uint8_image(np.zeros((512, 1280, 3))).numpy()
@@ -115,9 +112,10 @@ class VisualLog:
 
             vlog_image = np.concatenate([image_pred, image_grtr], axis=0)
             vlog_image_org = np.concatenate([image_pred_orgin, image_grtr_orgin], axis=0)
-            if step % 50 == 10:
-                cv2.imshow("detection_result", vlog_image)
-                cv2.waitKey(10)
+            # if step % 50 == 10:
+            cv2.imshow("detection_result", vlog_image)
+            cv2.imshow("detection_result_vlog_image_org", vlog_image_org)
+            cv2.waitKey(10)
             filename = op.join(self.vlog_path, f"{step * batch + i:05d}.jpg")
             filename_ori = op.join(self.vlog_path, f"{step * batch + i:05d}_ori.jpg")
             cv2.imwrite(filename, vlog_image)
@@ -227,6 +225,35 @@ class VisualLog:
             annotation = f"{self.lane_ctgr[category[n]]}"
             for i in range(point.shape[0]):
                 cv2.circle(image, (point[i, 1], point[i, 0]), 1, color, 6)
+            cv2.putText(image, annotation, (point[2, 1], point[2, 0]), cv2.FONT_HERSHEY_PLAIN, 1.0, color, 2)
+        return image
+
+    def draw_30_lanes(self, image, lanes, frame_idx, color, image_shape):
+        image = image.copy()
+        height, width = image_shape[:2]
+        fpoints = lanes["lane_fpoints"][frame_idx]  # (N, 10)
+        category = lanes["lane_category"][frame_idx]
+
+        valid_mask = fpoints[:, 4] > 0
+        fpoints = fpoints[valid_mask, :]
+        category = category[valid_mask, 0]
+
+        for n in range(fpoints.shape[0]):
+            point = (fpoints[n].reshape(-1, 2) * np.array([height, width])).astype(np.int32) + np.array([self.crop_tlbr[0], self.crop_tlbr[1]])
+
+            xys = list()
+            for index in range(len(point) - 1):
+                alpha = (point[index + 1, 0] - point[index, 0]) / (point[index + 1, 1] - point[index, 1])
+                beta = point[index, 0] - alpha * point[index, 1]
+                mask = (self.y_axis < point[index, 0]) * (self.y_axis > point[index + 1, 0])
+                y = self.y_axis[mask]
+                x = (y - beta) / alpha
+                xy = np.stack([x, y], axis=-1)
+                xys.append(xy)
+            xys = np.concatenate(xys, axis=0)
+            annotation = f"{self.lane_ctgr[category[n]]}"
+            for i in range(xys.shape[0]):
+                cv2.circle(image, (int(xys[i, 0]), int(xys[i, 1])), 1, color, 6)
             cv2.putText(image, annotation, (point[2, 1], point[2, 0]), cv2.FONT_HERSHEY_PLAIN, 1.0, color, 2)
         return image
 

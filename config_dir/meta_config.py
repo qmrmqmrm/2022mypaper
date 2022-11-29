@@ -186,7 +186,7 @@ class Train:
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
-    DATA_BATCH_SIZE = 2
+    DATA_BATCH_SIZE = 16
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN
