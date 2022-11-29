@@ -44,7 +44,7 @@ class TrainValBase:
 
             if step >= self.epoch_steps:
                 break
-            # if step >= 10:
+            # if step >= 100:
             #     break
 
         print("")
@@ -200,3 +200,4 @@ class ModelValidater(TrainValBase):
         prediction = self.model(features["image"])
         total_loss, loss_by_type = self.loss_object(features, prediction)
         return prediction, total_loss, loss_by_type, features
+

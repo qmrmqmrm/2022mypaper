@@ -2,34 +2,20 @@ import numpy as np
 
 
 class LossComb:
-    STANDARD = {"iou": ([1., 1., 1.], "IouLoss"), "object": ([1., 1., 1.], "BoxObjectnessLoss", 1, 1),
-                "category": ([1., 1., 1.], "MajorCategoryLoss")}
-    UPLUS_BASIC = {"iou": ([1., 1., 1.], "CiouLoss"), "object": ([1., 1., 1.], "BoxObjectnessLoss", 1, 1),
-                   "category": ([1, 1, 1.], "MajorCategoryLoss"), "distance": ([1., 1., 1.], "DistanceLoss")}
-    UPLUS_SCALE_WEIGHT = {"iou": ([1., 1., 1.], "CiouLoss"), "object": ([2., 2., 2.], "BoxObjectnessLoss", 3., 1.),
-                          "category": ([2, 2, 3.], "MajorCategoryLoss"), "distance": ([1., 1., 1.], "DistanceLoss")}
-    UPLUS_MINOR_WEIGHT = {"sign_ctgr": ([2., 1., 1.], "MinorCategoryLoss", "sign_ctgr"),
-                          "mark_ctgr": ([2., 1., 1.], "MinorCategoryLoss", "mark_ctgr"),
-                          }
-    UPLUS_SPEED_WEIGHT = {"sign_speed": ([2, 1, 1.], "MinorSpeedCategoryLoss", "sign_ctgr", "sign_speed"),
-                          "mark_speed": ([2, 1, 1.], "MinorSpeedCategoryLoss", "mark_ctgr", "mark_speed"),
-                          }
-
-    UPLUS_LANE_WEIGHT = {"laneness": (3., "LanenessLoss", 1, 1),
+    CULANE_WEIGHT = {"laneness": (3., "LanenessLoss", 1, 1),
                          "lane_fpoints": (10000., "FpointLoss"),
                          "lane_centerness": (5., "CenternessLoss", 3, 1),
                          "lane_category": (10., "LaneCategLoss")}
 
-    FULL_COMBINATION = {"basic": UPLUS_SCALE_WEIGHT, "minor": UPLUS_MINOR_WEIGHT,
-                        "speed": UPLUS_SPEED_WEIGHT, "lane": UPLUS_LANE_WEIGHT}
+    FULL_COMBINATION = {"lane": CULANE_WEIGHT}
 
 
 class TrainingPlan:
     UPLUS_PLAN = [
         # ("uplus", 1, 0.0000001, LossComb.FULL_COMBINATION, True),
-        ("uplus", 40, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("uplus", 40, 0.00001,  LossComb.FULL_COMBINATION, True),
-        ("uplus", 40, 0.000001, LossComb.FULL_COMBINATION, True),
+        ("culane", 40, 0.0001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 40, 0.00001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 40, 0.000001, LossComb.FULL_COMBINATION, True),
     ]
 
 
@@ -127,8 +113,9 @@ class TfrParams:
                 },
     }
 
-    LANE_MIN_PIX = {'train': {"Bgd": 0, "Lane": 55, "Stop_Line": 55},
-                    'val': {"Bgd": 0, "Lane": 50, "Stop_Line": 50},
+    LANE_MIN_PIX = {'train': {"Bgd": 0, "Lane1": 55, "Lane2": 55, "Lane3": 55, "Lane4": 55, },
+                    'val': {"Bgd": 0, "Lane1": 55, "Lane2": 55, "Lane3": 55, "Lane4": 55, },
+                    'test': {"Bgd": 0, "Lane1": 55, "Lane2": 55, "Lane3": 55, "Lane4": 55, },
                     }
 
     CATEGORY_NAMES = {"major": ["Bgd", "Pedestrian", "Car", "Truck", "Bus", "Motorcycle", "Traffic light",
@@ -139,11 +126,13 @@ class TfrParams:
                                "TS_SPEED_LIMIT"],
                       "mark": ["RM_NO_RIGHT", "RM_NO_LEFT", "RM_NO_STR", "RM_GO_RIGHT", "RM_GO_LEFT", "RM_GO_STR",
                                "RM_U_TURN", "RM_ANN_CWK", "RM_CROSSWK", "RM_SPEED_LIMIT"
-                              ],
-                      "sign_speed": ["TS_SPEED_LIMIT_30", "TS_SPEED_LIMIT_50", "TS_SPEED_LIMIT_80", "TS_SPEED_LIMIT_ETC"],
-                      "mark_speed": ["RM_SPEED_LIMIT_30", "RM_SPEED_LIMIT_50", "RM_SPEED_LIMIT_80", "RM_SPEED_LIMIT_ETC"],
+                               ],
+                      "sign_speed": ["TS_SPEED_LIMIT_30", "TS_SPEED_LIMIT_50", "TS_SPEED_LIMIT_80",
+                                     "TS_SPEED_LIMIT_ETC"],
+                      "mark_speed": ["RM_SPEED_LIMIT_30", "RM_SPEED_LIMIT_50", "RM_SPEED_LIMIT_80",
+                                     "RM_SPEED_LIMIT_ETC"],
                       "dont": ["Don't Care"],
-                      "lane": ["Bgd", "Lane", "Stop_Line"],
+                      "lane": ["Bgd", "Lane1", "Lane2", "Lane3", "Lane4"],
                       "dont_lane": ["Lane Don't Care"],
                       }
 
@@ -173,6 +162,21 @@ class TrainParams:
 
         return out_composition
 
+    @classmethod
+    def get_pred_lane_composition(cls,  categorized=False):
+        cls_composition = {"lane_category": len(TfrParams.CATEGORY_NAMES["lane"])}
+        reg_composition = {"laneness": 1, "lane_fpoints": 10, "lane_centerness": 1}
 
-assert list(TfrParams.MIN_PIX["train"].keys()) == TfrParams.CATEGORY_NAMES["major"]
-assert list(TfrParams.MIN_PIX["val"].keys()) == TfrParams.CATEGORY_NAMES["major"]
+        composition = {"reg": reg_composition, "cls": cls_composition}
+
+        if categorized:
+            out_composition = {name: sum(list(subdic.values())) for name, subdic in composition.items()}
+        else:
+            out_composition = dict()
+            for names, subdic in composition.items():
+                out_composition.update(subdic)
+
+        return out_composition
+
+assert list(TfrParams.LANE_MIN_PIX["train"].keys()) == TfrParams.CATEGORY_NAMES["lane"]
+assert list(TfrParams.LANE_MIN_PIX["val"].keys()) == TfrParams.CATEGORY_NAMES["lane"]

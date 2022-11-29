@@ -37,7 +37,7 @@ def analyze_performance(dataset_name, loss_weights, weight_suffix, latest_epoch)
     valid_category = uc.get_valid_category_mask(dataset_name)
 
     dataset_val, val_steps, imshape, anchors_per_scale \
-        = get_dataset(datapath, dataset_name, False, batch_size, "val", anchors)
+        = get_dataset(datapath, dataset_name, False, batch_size, "test", anchors)
     feature_creator = FeatureMapDistributer(cfg.FeatureDistribPolicy.POLICY_NAME, imshape, anchors_per_scale)
 
     model = ModelFactory(batch_size, imshape, anchors_per_scale, training=None).get_model()
@@ -46,7 +46,7 @@ def analyze_performance(dataset_name, loss_weights, weight_suffix, latest_epoch)
     validater = tv.ModelValidater(model, loss_object, val_steps, feature_creator, ckpt_path)
 
     print(f"========== Start analyze_performance with {dataset_name} epoch: {weight_suffix} ==========")
-    validater.run_epoch(dataset_val, None, latest_epoch, True, True, val_only=True)
+    validater.run_epoch(dataset_val, None, latest_epoch, True, False, val_only=True)
 
 
 def get_dataset(datapath, dataset_name, shuffle, batch_size, split, anchors):

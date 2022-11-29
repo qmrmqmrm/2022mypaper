@@ -19,11 +19,12 @@ class ModelFactory:
                  backbone_conv_args=cfg.Architecture.BACKBONE_CONV_ARGS,
                  neck_conv_args=cfg.Architecture.NECK_CONV_ARGS,
                  head_conv_args=cfg.Architecture.HEAD_CONV_ARGS,
-                 num_anchors_per_scale=cfg.ModelOutput.NUM_ANCHORS_PER_SCALE,
-                 head_composition=cfg.ModelOutput.HEAD_COMPOSITION,
+                 num_box_anchors_per_scale=cfg.ModelOutput.NUM_BOX_ANCHORS_PER_SCALE,
+                 head_box_composition=cfg.ModelOutput.HEAD_BOX_COMPOSITION,
+                 head_lane_composition=cfg.ModelOutput.HEAD_LANE_COMPOSITION,
                  num_lane_anchors_per_scale=cfg.ModelOutput.NUM_LANE_ANCHORS_PER_SCALE,
-                 out_channels=cfg.ModelOutput.NUM_MAIN_CHANNELS,
-                 lane_out_channels=cfg.ModelOutput.NUM_LANE_CHANNELS,
+                 box_out_channels=cfg.ModelOutput.NUM_BOX_MAIN_CHANNELS,
+                 lane_out_channels=cfg.ModelOutput.NUM_LANE_MAIN_CHANNELS,
                  training=True
                  ):
         self.batch_size = batch_size
@@ -35,10 +36,11 @@ class ModelFactory:
         self.backbone_conv_args = backbone_conv_args
         self.neck_conv_args = neck_conv_args
         self.head_conv_args = head_conv_args
-        self.num_anchors_per_scale = num_anchors_per_scale
+        self.num_box_anchors_per_scale = num_box_anchors_per_scale
         self.num_lane_anchors_per_scale = num_lane_anchors_per_scale
-        self.head_composition = head_composition
-        self.out_channels = out_channels
+        self.head_box_composition = head_box_composition
+        self.head_lane_composition = head_lane_composition
+        self.box_out_channels = box_out_channels
         self.lane_out_channels = lane_out_channels
         self.training = training
         mu.CustomConv2D.CALL_COUNT = -1
@@ -48,10 +50,14 @@ class ModelFactory:
     def get_model(self):
         backbone_model = back.backbone_factory(self.backbone_name, self.backbone_conv_args, self.training)
         neck_model = neck.neck_factory(self.neck_name, self.neck_conv_args, self.training,
-                                       self.num_anchors_per_scale, self.out_channels,
+                                       self.num_box_anchors_per_scale, self.box_out_channels,
                                        self.num_lane_anchors_per_scale, self.lane_out_channels)
-        head_model = head.head_factory(self.head_name, self.head_conv_args, self.training, self.num_anchors_per_scale,
-                                       self.head_composition, self.num_lane_anchors_per_scale, self.lane_out_channels)
+
+        head_model = head.head_factory(self.head_name, self.head_conv_args, self.training,
+                                       self.head_box_composition, self.head_lane_composition,
+                                       self.num_box_anchors_per_scale, self.box_out_channels,
+
+                                       self.num_lane_anchors_per_scale, self.lane_out_channels)
 
         input_tensor = tf.keras.layers.Input(shape=self.input_shape, batch_size=self.batch_size)
         backbone_features = backbone_model(input_tensor)
@@ -59,10 +65,11 @@ class ModelFactory:
         head_features = head_model(neck_features)
 
         output_features = {}
-        feature_decoder = decoder.FeatureDecoder(self.anchors_per_scale)
-        feat_box_logit = head_features[:-1] if cfg.ModelOutput.LANE_DET else head_features
-        feat_box_logit = uf.merge_and_slice_features(feat_box_logit, False, "feat_box")
-        output_features["feat_box"] = feature_decoder(feat_box_logit)
+        if cfg.ModelOutput.BOX_DET:
+            feature_decoder = decoder.FeatureDecoder(self.anchors_per_scale)
+            feat_box_logit = head_features[:-1] if cfg.ModelOutput.LANE_DET else head_features
+            feat_box_logit = uf.merge_and_slice_features(feat_box_logit, False, "feat_box")
+            output_features["feat_box"] = feature_decoder(feat_box_logit)
 
         if cfg.ModelOutput.LANE_DET:
             lane_decoder = decoder.FeatureLaneDecoder()

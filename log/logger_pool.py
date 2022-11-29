@@ -7,7 +7,7 @@ import utils.framework.util_function as uf
 class LogBase:
     def __init__(self, logkey):
         self.logkey = logkey
-        self.num_categs = cfg.ModelOutput.PRED_FMAP_COMPOSITION["category"]
+        self.num_categs = cfg.ModelOutput.PRED_FMAP_BOX_COMPOSITION["category"]
         self.num_lane_categs = cfg.ModelOutput.PRED_FMAP_LANE_COMPOSITION["lane_category"]
         self.num_scales = len(cfg.ModelOutput.FEATURE_SCALES)
 

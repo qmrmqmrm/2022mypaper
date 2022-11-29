@@ -107,6 +107,11 @@ def merge_and_slice_features(featin, is_gt: bool, feat_type: str):
         featout["merged"] = featin
         featout.update(slice_feature(featin, composition))
 
+    if feat_type == "inst_ldc":
+        composition = uc.get_lane_composition(is_gt)
+        featout["merged"] = featin
+        featout.update(slice_feature(featin, composition))
+
     if feat_type.startswith("feat_box"):
         composition = uc.get_channel_composition(is_gt)
         newfeat = []

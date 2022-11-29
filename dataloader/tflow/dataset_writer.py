@@ -31,6 +31,9 @@ def drive_manager_factory(dataset_name, split, srcpath):
     elif dataset_name == "city":
         from dataloader.readers.city_reader import CityDriveManager
         return CityDriveManager(srcpath, split)
+    elif dataset_name == "culane":
+        from dataloader.readers.culane_reader import CULaneDriveManager
+        return CULaneDriveManager(srcpath, split)
     else:
         assert 0, f"[drive_manager_factory] invalid dataset name: {dataset_name}"
 
@@ -48,6 +51,9 @@ def drive_reader_factory(dataset_name, dataset_cfg, split, drive_path):
     elif dataset_name == "city":
         from dataloader.readers.city_reader import CityReader
         return CityReader(drive_path, split, dataset_cfg)
+    elif dataset_name == "culane":
+        from dataloader.readers.culane_reader import CULaneReader
+        return CULaneReader(drive_path, split, dataset_cfg)
     else:
         assert 0, f"[drive_reader_factory] invalid dataset name: {dataset_name}"
 

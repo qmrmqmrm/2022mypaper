@@ -23,7 +23,10 @@ class IntegratedLoss:
         return box_loss_weights, lane_loss_weights
 
     def __call__(self, features, predictions):
-        total_loss, loss_by_type = self.box_loss(features, predictions)
+        total_loss = 0
+        loss_by_type = {}
+        if cfg.ModelOutput.BOX_DET:
+            total_loss, loss_by_type = self.box_loss(features, predictions)
         if cfg.ModelOutput.LANE_DET:
             lane_scalar_loss, lane_loss_by_type = self.lane_loss(features, predictions)
             total_loss += lane_scalar_loss

@@ -21,7 +21,8 @@ class FeatureMapDistributer:
         for key in feat_keys:
             features[key] = uf.merge_and_slice_features(features[key], True, key)
         features = uf.convert_tensor_to_numpy(features)
-        features["feat_box"] = self.box_ditrib_policy(features["inst_box"])
+        if cfg.ModelOutput.BOX_DET:
+            features["feat_box"] = self.box_ditrib_policy(features["inst_box"])
         if self.include_lane:
             features["feat_lane"] = self.lane_ditrib_policy(features)
             features["feat_lane_logit"] = self.lane_encoder.inverse(features["feat_lane"])

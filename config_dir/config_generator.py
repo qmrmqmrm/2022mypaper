@@ -29,36 +29,22 @@ def set_loss_combination():
     new_plan = []
     for period_plan in meta.Train.TRAINING_PLAN:
         dataset, epochs, lr, loss_comb, save = period_plan
-        new_loss_comb = loss_comb["basic"]
-        if meta.ModelOutput.MINOR_CTGR:
-            new_loss_comb.update(loss_comb["minor"])
-        if meta.ModelOutput.SPEED_LIMIT:
-            new_loss_comb.update(loss_comb["speed"])
-        if meta.ModelOutput.LANE_DET:
-            new_loss_comb.update(loss_comb["lane"])
+        new_loss_comb = loss_comb["lane"]
         new_plan.append((dataset, epochs, lr, new_loss_comb, save))
     meta.Train.TRAINING_PLAN = new_plan
 
 
 def set_log_columns():
-    columns = meta.Log.ExhaustiveLog.DETAIL
-    detail_columns = columns["base"]
-    if meta.ModelOutput.IOU_AWARE:
-        detail_columns += columns["aware"]
-    meta.Log.ExhaustiveLog.DETAIL = detail_columns
+    columns = meta.Log.ExhaustiveLog.LANE_DETAIL
+    detail_columns = columns["lane"]
+    meta.Log.ExhaustiveLog.LANE_DETAIL = detail_columns
 
-    columns = meta.Log.ExhaustiveLog.COLUMNS_TO_MEAN
-    mean_columns = columns["base"]
-    if meta.ModelOutput.MINOR_CTGR:
-        mean_columns += columns["minor"]
-    if meta.ModelOutput.SPEED_LIMIT:
-        mean_columns += columns["speed"]
-    meta.Log.ExhaustiveLog.COLUMNS_TO_MEAN = mean_columns
+    columns = meta.Log.ExhaustiveLog.COLUMNS_TO_LANE_MEAN
+    mean_columns = columns["lane"]
+    meta.Log.ExhaustiveLog.COLUMNS_TO_LANE_MEAN = mean_columns
 
     columns = meta.Log.HistoryLog.SUMMARY
-    new_hislog_comb = columns["base"]
-    if meta.ModelOutput.LANE_DET:
-        new_hislog_comb += columns["lane"]
+    new_hislog_comb = columns["lane"]
     meta.Log.HistoryLog.SUMMARY = new_hislog_comb
 
 

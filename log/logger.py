@@ -13,17 +13,18 @@ import utils.framework.util_function as uf
 import model.framework.model_util as mu
 import config as cfg
 import config_dir.util_config as uc
-
+from log.save_pred import SavePred
 
 class Logger:
     def __init__(self, visual_log, exhaustive_log, loss_names, ckpt_path, epoch, is_train, val_only):
         self.history_logger = HistoryLog(loss_names, is_train)
         self.exhaustive_log = exhaustive_log
-        self.exhaustive_box_logger = ExhaustiveBoxLog(loss_names) if exhaustive_log else None
-        self.exhaustive_lane_logger = ExhaustiveLaneLog(loss_names) if exhaustive_log else None
+        self.save_pred = SavePred(op.join(ckpt_path, "result"))
+        self.exhaustive_box_logger = ExhaustiveBoxLog(loss_names) if exhaustive_log and cfg.ModelOutput.BOX_DET else None
+        self.exhaustive_lane_logger = ExhaustiveLaneLog(loss_names) if exhaustive_log and cfg.ModelOutput.LANE_DET else None
         self.visual_logger = VisualLog(ckpt_path, epoch) if visual_log else None
         self.history_filename = op.join(ckpt_path, "history.csv")
-        self.num_channel = cfg.ModelOutput.NUM_MAIN_CHANNELS
+        self.num_channel = cfg.ModelOutput.NUM_BOX_MAIN_CHANNELS
         self.exhaust_path = op.join(ckpt_path, "exhaust_log")
         if not op.isdir(self.exhaust_path):
             os.makedirs(self.exhaust_path, exist_ok=True)
@@ -38,10 +39,11 @@ class Logger:
         self.check_nan(grtr, "grtr")
         self.check_nan(pred, "pred")
         self.check_nan(loss_by_type, "loss")
-        nms_boxes = self.nms_box(pred["feat_box"])
-        inst_box = uf.slice_feature(nms_boxes, uc.get_bbox_composition(False))
-        inst_box = self.nms_box(inst_box, merged=True, is_inst=True)
-        pred["inst_box"] = uf.slice_feature(inst_box, uc.get_bbox_composition(False))
+        if cfg.ModelOutput.BOX_DET:
+            nms_boxes = self.nms_box(pred["feat_box"])
+            inst_box = uf.slice_feature(nms_boxes, uc.get_bbox_composition(False))
+            inst_box = self.nms_box(inst_box, merged=True, is_inst=True)
+            pred["inst_box"] = uf.slice_feature(inst_box, uc.get_bbox_composition(False))
 
         if cfg.ModelOutput.LANE_DET:
             lane_hw = pred["feat_lane"]["whole"][0].shape[1:3]
@@ -60,11 +62,14 @@ class Logger:
         self.history_logger(step, grtr, pred, loss_by_type, total_loss)
 
         if self.exhaustive_log:
-            self.exhaustive_box_logger(step, grtr, pred, loss_by_type, total_loss)
+            if cfg.ModelOutput.BOX_DET:
+                self.exhaustive_box_logger(step, grtr, pred, loss_by_type, total_loss)
             if cfg.ModelOutput.LANE_DET:
                 self.exhaustive_lane_logger(step, grtr, pred, loss_by_type, total_loss)
         if self.visual_logger:
             self.visual_logger(step, grtr, pred)
+        if self.val_only:
+            self.save_pred(step, grtr, pred)
 
     def check_nan(self, features, feat_name):
         valid_result = True
@@ -74,6 +79,8 @@ class Logger:
         elif isinstance(features, list):
             for idx, tensor in enumerate(features):
                 self.check_nan(tensor, f"{feat_name}_{idx}")
+        elif isinstance(features, str):
+            pass
         else:
             if features.ndim == 0 and (np.isnan(features) or np.isinf(features) or features > 100000000):
                 print(f"nan loss: {feat_name}, {features}")
@@ -86,7 +93,8 @@ class Logger:
     def finalize(self, start):
         self.history_logger.finalize(start)
         if self.exhaustive_log:
-            self.save_exhaustive_log(start, self.exhaustive_box_logger, "box")
+            if cfg.ModelOutput.BOX_DET:
+                self.save_exhaustive_log(start, self.exhaustive_box_logger, "box")
             if cfg.ModelOutput.LANE_DET:
                 self.save_exhaustive_log(start, self.exhaustive_lane_logger, "lane")
         if self.val_only:

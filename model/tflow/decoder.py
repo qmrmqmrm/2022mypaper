@@ -68,7 +68,7 @@ class FeatureDecoder:
         """
         Original yolo v3 implementation: yx_dec = tf.sigmoid(yx_raw)
         For yx_dec to be close to 0 or 1, yx_raw should be -+ infinity
-        By expanding activation range -0.2 ~ 1.4, yx_dec can be close to 0 or 1 from moderate values of yx_raw 
+        By expanding activation range -0.2 ~ 1.4, yx_dec can be close to 0 or 1 from moderate values of yx_raw
         """
         # grid_x: (grid_h, grid_w)
         grid_x, grid_y = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))

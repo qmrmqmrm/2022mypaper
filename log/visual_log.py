@@ -18,6 +18,8 @@ class VisualLog:
             os.makedirs(self.vlog_path)
         if not op.isdir(self.visual_heatmap_path):
             os.makedirs(self.visual_heatmap_path)
+        self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, "test")
+        self.image_files.sort()
         self.categories = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["major"])}
         self.sign_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["sign"])}
         self.mark_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["mark"])}
@@ -25,55 +27,101 @@ class VisualLog:
         self.mark_speed_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["mark_speed"])}
         self.lane_ctgr = {i: ctgr_name for i, ctgr_name in enumerate(cfg.Dataloader.CATEGORY_NAMES["lane"])}
 
+    def init_drive(self, drive_path, split):
+        testset_file = op.join(drive_path, "list", f'{split}.txt')
+        frame_names = self.push_list(drive_path, testset_file)
+        frame_names.sort()
+        print("[CULaneReader.init_drive] # frames:", len(frame_names), "first:", frame_names[0])
+        return frame_names
+
+    def push_list(self, drive_path, testset_file):
+        test_list = []
+        with open(testset_file, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line[1:]
+                target_file = op.join(drive_path, line).strip('\n')
+                test_list.append(target_file)
+        return test_list
+
     def __call__(self, step, grtr, pred):
         """
         :param step: integer step index
         :param grtr: slices of GT data {'image': (B,H,W,3), 'bboxes': {'yxhw': (B,N,4), ...}, 'feature_l': {'yxhw': (B,HWA,4), ...}, ...}
         :param pred: slices of pred. data {'bboxes': {'yxhw': (B,N,4), ...}, 'feature_l': {'yxhw': (B,HWA,4), ...}, ...}
         """
-        grtr_bbox_augmented = self.exapand_grtr_bbox(grtr, pred)
-        splits = split_true_false(grtr_bbox_augmented, pred["inst_box"], grtr["inst_dc"],
-                                  cfg.Validation.TP_IOU_THRESH)
+        if cfg.ModelOutput.BOX_DET:
+            grtr_bbox_augmented = self.exapand_grtr_bbox(grtr, pred)
+            splits = split_true_false(grtr_bbox_augmented, pred["inst_box"], grtr["inst_dc"],
+                                      cfg.Validation.TP_IOU_THRESH)
 
         if cfg.ModelOutput.LANE_DET:
             splits_lane = split_lane_true_false(grtr["inst_lane"], pred["inst_lane"],
                                                 cfg.Validation.LANE_TP_IOU_THRESH, grtr['image'].shape[1:3],
                                                 is_train=False)
 
-        batch = splits["grtr_tp"]["yxhw"].shape[0]
+        batch = cfg.Train.DATA_BATCH_SIZE
 
         for i in range(batch):
             # grtr_log_keys = ["pred_object", "pred_ctgr_prob", "pred_score", "distance"]
+            image_file = self.image_files[step * batch + i]
+            image_grtr_orgin = cv2.imread(image_file)
+            # image_grtr = cv2.imread(image_file)
+            image_pred_orgin = cv2.imread(image_file)
+            # image_pred = cv2.imread(image_file)
             image_grtr = uf.to_uint8_image(grtr["image"][i]).numpy()
-            image_grtr = self.draw_boxes(image_grtr, splits["grtr_tp"], i, self.grtr_log_keys, (0, 255, 0))
-            image_grtr = self.draw_boxes(image_grtr, splits["grtr_fn"], i, self.grtr_log_keys, (0, 0, 255))
-            image_grtr = self.draw_boxes(image_grtr, splits["grtr_dc"], i, self.grtr_log_keys, (100, 100, 100))
-            image_grtr = self.draw_boxes(image_grtr, splits["grtr_far"], i, self.grtr_log_keys, (255, 100, 100))
-
             image_pred = uf.to_uint8_image(grtr["image"][i]).numpy()
-            image_pred = self.draw_boxes(image_pred, splits["pred_tp"], i, self.pred_log_keys, (0, 255, 0))
-            image_pred = self.draw_boxes(image_pred, splits["pred_fp"], i, self.pred_log_keys, (0, 0, 255))
-            image_pred = self.draw_boxes(image_pred, splits["pred_dc"], i, self.pred_log_keys, (100, 100, 100))
-            image_pred = self.draw_boxes(image_pred, splits["pred_far"], i, self.pred_log_keys, (255, 100, 100))
+            if cfg.ModelOutput.BOX_DET:
+
+                image_grtr = self.draw_boxes(image_grtr, splits["grtr_tp"], i, self.grtr_log_keys, (0, 255, 0))
+                image_grtr = self.draw_boxes(image_grtr, splits["grtr_fn"], i, self.grtr_log_keys, (0, 0, 255))
+                image_grtr = self.draw_boxes(image_grtr, splits["grtr_dc"], i, self.grtr_log_keys, (100, 100, 100))
+                image_grtr = self.draw_boxes(image_grtr, splits["grtr_far"], i, self.grtr_log_keys, (255, 100, 100))
+
+                image_grtr_orgin = self.draw_boxes(image_grtr_orgin, splits["grtr_tp"], i, self.grtr_log_keys, (0, 255, 0))
+                image_grtr_orgin = self.draw_boxes(image_grtr_orgin, splits["grtr_fn"], i, self.grtr_log_keys, (0, 0, 255))
+                image_grtr_orgin = self.draw_boxes(image_grtr_orgin, splits["grtr_dc"], i, self.grtr_log_keys, (100, 100, 100))
+                image_grtr_orgin = self.draw_boxes(image_grtr_orgin, splits["grtr_far"], i, self.grtr_log_keys, (255, 100, 100))
+
+                image_pred = self.draw_boxes(image_pred, splits["pred_tp"], i, self.pred_log_keys, (0, 255, 0))
+                image_pred = self.draw_boxes(image_pred, splits["pred_fp"], i, self.pred_log_keys, (0, 0, 255))
+                image_pred = self.draw_boxes(image_pred, splits["pred_dc"], i, self.pred_log_keys, (100, 100, 100))
+                image_pred = self.draw_boxes(image_pred, splits["pred_far"], i, self.pred_log_keys, (255, 100, 100))
+
+                image_pred_orgin = self.draw_boxes(image_pred_orgin, splits["pred_tp"], i, self.pred_log_keys, (0, 255, 0))
+                image_pred_orgin = self.draw_boxes(image_pred_orgin, splits["pred_fp"], i, self.pred_log_keys, (0, 0, 255))
+                image_pred_orgin = self.draw_boxes(image_pred_orgin, splits["pred_dc"], i, self.pred_log_keys, (100, 100, 100))
+                image_pred_orgin = self.draw_boxes(image_pred_orgin, splits["pred_far"], i, self.pred_log_keys, (255, 100, 100))
 
             if cfg.ModelOutput.LANE_DET:
                 image_grtr = self.draw_lanes(image_grtr, splits_lane['grtr_tp'], i, (0, 255, 0))
                 image_grtr = self.draw_lanes(image_grtr, splits_lane['grtr_fn'], i, (0, 0, 255))
+
+                image_grtr_orgin = self.draw_lanes(image_grtr_orgin, splits_lane['grtr_tp'], i, (0, 255, 0))
+                image_grtr_orgin = self.draw_lanes(image_grtr_orgin, splits_lane['grtr_fn'], i, (0, 0, 255))
+
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_tp"], i, (0, 255, 0))
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_fp"], i, (0, 0, 255))
 
+                image_pred_orgin = self.draw_lanes(image_pred_orgin, splits_lane["pred_tp"], i, (0, 255, 0))
+                image_pred_orgin = self.draw_lanes(image_pred_orgin, splits_lane["pred_fp"], i, (0, 0, 255))
+
             if self.visual_heatmap_path:
                 image_zero = uf.to_uint8_image(np.zeros((512, 1280, 3))).numpy()
-                self.draw_box_heatmap(grtr, pred, image_zero, i, step, batch)
+                if cfg.ModelOutput.BOX_DET:
+                    self.draw_box_heatmap(grtr, pred, image_zero, i, step, batch)
                 if cfg.ModelOutput.LANE_DET:
                     self.draw_lane_heatmap(grtr, pred, image_zero, i, step, batch)
 
             vlog_image = np.concatenate([image_pred, image_grtr], axis=0)
+            vlog_image_org = np.concatenate([image_pred_orgin, image_grtr_orgin], axis=0)
             if step % 50 == 10:
                 cv2.imshow("detection_result", vlog_image)
                 cv2.waitKey(10)
             filename = op.join(self.vlog_path, f"{step * batch + i:05d}.jpg")
+            filename_ori = op.join(self.vlog_path, f"{step * batch + i:05d}_ori.jpg")
             cv2.imwrite(filename, vlog_image)
+            cv2.imwrite(filename_ori, vlog_image_org)
 
     def exapand_grtr_bbox(self, grtr, pred):
         grtr_boxes = uf.merge_scale(grtr["feat_box"])

@@ -4,18 +4,18 @@ import numpy as np
 
 
 class Paths:
-    RESULT_ROOT = "/home/falcon/mun_workspace"
-    DATAPATH = op.join(RESULT_ROOT, "tfrecord")
+    RESULT_ROOT = "/home/cheetah/kim_workspace"
+    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
-    CONFIG_FILENAME = '/home/falcon/mun_workspace/RILabDetector/config.py'
-    META_CFG_FILENAME = '/home/falcon/mun_workspace/RILabDetector/config_dir/meta_config.py'
+    CONFIG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config.py'
+    META_CFG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config_dir/meta_config.py'
 
 
 class Datasets:
     # specific dataset configs MUST have the same items
     class Kitti:
         NAME = "kitti"
-        PATH = "/home/rilab-01/workspace/detlec/kitti"
+        PATH = "/home/cheetah-01/IntHDD/datasets/kitti"
         CATEGORIES_TO_USE = ["Pedestrian", "Car", "Van", "Truck", "Cyclist"]
         CATEGORY_REMAP = {"Pedestrian": "Person", "Cyclist": "Bicycle"}
         INPUT_RESOLUTION = (256, 832)
@@ -24,9 +24,21 @@ class Datasets:
         CROP_TLBR = [0, 0, 0, 0]
         # crop [top, left, bottom, right] or [y1 x1 y2 x2]
 
+    class Culane:
+        NAME = "culane"
+        PATH = "/media/cheetah/IntHDD/datasets/culane"
+        CATEGORIES_TO_USE = ["Lane1, Lane2, Lane3, Lane4"]
+        CATEGORY_REMAP = {}
+        # INPUT_RESOLUTION = (590, 1640)
+        INPUT_RESOLUTION = (576, 1600)
+        INCLUDE_LANE = [True, False][1]
+        # (4,13) * 64
+        CROP_TLBR = [14, 20, 0, 20]
+        # crop [top, left, bottom, right] or [y1 x1 y2 x2]
+
     class Uplus:
         NAME = "uplus"
-        PATH = "/home/dolphin/kim_workspace/uplus22"
+        PATH = "/home/cheetah/kim_workspace/uplus22"
         CATEGORIES_TO_USE = params.Uplus2Params.CATEGORIES_TO_USE
         CATEGORY_REMAP = params.Uplus2Params.CATEGORY_REMAP
         LANE_TYPES = params.Uplus2Params.LANE_TYPES
@@ -86,20 +98,21 @@ class Datasets:
         DIST_QUANTILE = 0.2
 
     DATASET_CONFIG = None
-    TARGET_DATASET = "uplus"
+    TARGET_DATASET = "culane"
     MAX_FRAMES = 100000
 
 
 class Dataloader:
     DATASETS_FOR_TFRECORD = {
         # "kitti": ("train", "val"),
-        "uplus": ("train", "val"),
+        # "uplus": ( "val"),
+        "culane": ("train", "val", "test"),
         # "city": ("train", "val"),
         # "a2d2": ("train", "val"),
     }
     MAX_BBOX_PER_IMAGE = 100
     MAX_DONT_PER_IMAGE = 100
-    MAX_LANE_PER_IMAGE = 30
+    MAX_LANE_PER_IMAGE = 4
     MAX_POINTS_PER_LANE = 50
 
     CATEGORY_NAMES = params.TfrParams.CATEGORY_NAMES
@@ -112,30 +125,32 @@ class ModelOutput:
     FEATURE_SCALES = [8, 16, 32]
     LANE_DET = True
     # CATEGORY_LEVEL = 1~3    # TODO
-    MINOR_CTGR = True
+    MINOR_CTGR = False
     SPEED_LIMIT = False
     FEAT_RAW = False
     IOU_AWARE = False
+    BOX_DET = False
 
-    NUM_ANCHORS_PER_SCALE = 3
-    GRTR_FMAP_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1, "distance": 1,
+    NUM_BOX_ANCHORS_PER_SCALE = 3
+    GRTR_FMAP_BOX_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1, "distance": 1,
                              "anchor_ind": 1}
-    PRED_FMAP_COMPOSITION = params.TrainParams.get_pred_composition(MINOR_CTGR, SPEED_LIMIT, IOU_AWARE)
-    HEAD_COMPOSITION = params.TrainParams.get_pred_composition(MINOR_CTGR, SPEED_LIMIT, IOU_AWARE, True)
+    PRED_FMAP_BOX_COMPOSITION = params.TrainParams.get_pred_composition(MINOR_CTGR, SPEED_LIMIT, IOU_AWARE)
+    HEAD_BOX_COMPOSITION = params.TrainParams.get_pred_composition(MINOR_CTGR, SPEED_LIMIT, IOU_AWARE, True)
 
-    GRTR_INST_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1, "distance": 1}
-    PRED_INST_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1,
+    GRTR_INST_BOX_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1, "distance": 1}
+    PRED_INST_BOX_COMPOSITION = {"yxhw": 4, "object": 1, "category": 1, "minor_ctgr": 1, "speed_ctgr": 1,
                              "distance": 1, "ctgr_prob": 1, "score": 1, "anchor_ind": 1}
 
-    NUM_MAIN_CHANNELS = sum(PRED_FMAP_COMPOSITION.values())
+    NUM_BOX_MAIN_CHANNELS = sum(PRED_FMAP_BOX_COMPOSITION.values())
 
     NUM_LANE_ANCHORS_PER_SCALE = 1
     GRTR_FMAP_LANE_COMPOSITION = {"laneness": 1,  "lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
-    PRED_FMAP_LANE_COMPOSITION = {"laneness": 1, "lane_fpoints": 10, "lane_centerness": 1,
-                                  "lane_category": len(params.TfrParams.CATEGORY_NAMES["lane"])}
+    PRED_FMAP_LANE_COMPOSITION =  params.TrainParams.get_pred_lane_composition(False)
+    HEAD_LANE_COMPOSITION = params.TrainParams.get_pred_lane_composition(True)
+
     GRTR_INST_LANE_COMPOSITION = {"lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
     PRED_INST_LANE_COMPOSITION = {"lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
-    NUM_LANE_CHANNELS = sum(PRED_FMAP_LANE_COMPOSITION.values())
+    NUM_LANE_MAIN_CHANNELS = sum(PRED_FMAP_LANE_COMPOSITION.values())
 
 
 class Architecture:
@@ -167,15 +182,15 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "new_v3"
+    CKPT_NAME = "culane_v2"
     MODE = ["eager", "graph", "distribute"][1]
-    # AUGMENT_PROBS = None
-    AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
+    AUGMENT_PROBS = None
+    # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
     DATA_BATCH_SIZE = 2
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN
-    DETAIL_LOG_EPOCHS = list(range(10, 100, 10))
+    DETAIL_LOG_EPOCHS = list(range(5, 100, 5))
     IGNORE_MASK = True
     # AUGMENT_PROBS = {"Flip": 0.2}
 
@@ -231,9 +246,9 @@ class NmsInfer:
     IOU_THRESH = [0, 0.28, 0.1, 0.34, 0.1, 0.3, 0.38, 0.32, 0.28, 0.4, 0.1, 0.26, 0.4, 0.26, 0.38, 0.1]
     SCORE_THRESH = [1, 0.3, 0.36, 0.34, 0.2, 0.14, 0.28, 0.16, 0.24, 0.24, 0.26, 0.3, 0.16, 0.3, 0.18, 0.38]
 
-    LANE_MAX_OUT = [0, 5, 3]
-    LANE_OVERLAP_THRESH = [0, 0.7, 0.74]
-    LANE_SCORE_THRESH = [1, 0.03, 0.03]
+    LANE_MAX_OUT = [0, 1, 1, 1, 1]
+    LANE_OVERLAP_THRESH = [0, 0.65, 0.4, 0.45, 0.1]
+    LANE_SCORE_THRESH = [1, 0.08, 0.12, 0.08, 0.04]
 
 
 class NmsOptim:
@@ -241,9 +256,9 @@ class NmsOptim:
     SCORE_CANDIDATES = np.arange(0.02, 0.4, 0.02)
     MAX_OUT_CANDIDATES = np.arange(5, 20, 1)
 
-    LANE_IOU_CANDIDATES = np.arange(0.7, .9, 0.02)
-    LANE_SCORE_CANDIDATES = np.arange(0.02, 0.04, 0.01)
-    LANE_MAX_OUT_CANDIDATES = np.arange(2, 6, 1)
+    LANE_IOU_CANDIDATES = np.arange(0.1, .9, 0.05)
+    LANE_SCORE_CANDIDATES = np.arange(0.02, 0.4, 0.02)
+    LANE_MAX_OUT_CANDIDATES = np.arange(1, 3, 1)
 
 
 class Validation:
@@ -253,7 +268,7 @@ class Validation:
     VAL_EPOCH = "latest"
     MAP_TP_IOU_THRESH = [0.5]
     MAX_BOX = 200
-    LANE_TP_IOU_THRESH = [0.33]
+    LANE_TP_IOU_THRESH = [0.5]
 
 
 class Log:
@@ -264,15 +279,9 @@ class Log:
                    "lane": ["pos_lane", "neg_lane", "pos_center", "neg_center"]}
 
     class ExhaustiveLog:
-        DETAIL = {"base": ["pos_obj", "neg_obj", "iou_mean", "box_yx", "box_hw", "true_class", "false_class"],
-                  "aware": ["iou_aware"]}
-        LANE_DETAIL = ["pos_lane", "neg_lane", "pos_lanecenter", "neg_lanecenter", "lane_true_class", "lane_false_class"]
-        COLUMNS_TO_MEAN = {"base": ["anchor", "ctgr", "iou", "object", "category", "distance", "pos_obj", "neg_obj",
-                                    "iou_mean", "box_hw", "box_yx", "true_class", "false_class"],
-                           "minor": ["sign_ctgr", "mark_ctgr"],
-                           "speed": ["sign_speed", "mark_speed"]}
-        COLUMNS_TO_LANE_MEAN = ["ctgr", "laneness", "lane_fpoints", "lane_category", "lane_centerness",
-                                "pos_lane", "neg_lane", "pos_lanecenter", "neg_lanecenter",
-                                "lane_true_class", "lane_false_class"]
-        COLUMNS_TO_SUM = ["anchor", "ctgr", "trpo", "grtr", "pred"]
+        LANE_DETAIL = {"lane": ["pos_lane", "neg_lane", "pos_lanecenter", "neg_lanecenter", "lane_true_class",
+                                "lane_false_class"]}
+        COLUMNS_TO_LANE_MEAN = {"lane": ["ctgr", "laneness", "lane_fpoints", "lane_category", "lane_centerness",
+                                         "pos_lane", "neg_lane", "pos_lanecenter", "neg_lanecenter",
+                                         "lane_true_class", "lane_false_class"]}
         COLUMNS_TO_LANE_SUM = ["ctgr", "trpo_lane", "grtr_lane", "pred_lane"]

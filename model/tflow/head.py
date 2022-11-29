@@ -7,29 +7,42 @@ import model.framework.model_util as mu
 import utils.framework.util_function as uf
 
 
-def head_factory(output_name, conv_args, training, num_anchors_per_scale, head_composition, num_lane_anchors,
-                 lane_out_channels):
+def head_factory(output_name, conv_args, training,
+                 head_box_composition, head_lane_composition,
+                 num_anchors_per_scale, box_out_channels,
+                 num_lane_anchors_per_scale, lane_out_channels):
     if output_name == "Double":
-        return DoubleOutput(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
+        return DoubleOutput(conv_args, num_anchors_per_scale, box_out_channels,
+                            head_box_composition, head_lane_composition,
+                            num_lane_anchors_per_scale, lane_out_channels)
     elif output_name == "Single":
-        return SingleOutput(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
+        return SingleOutput(conv_args, num_anchors_per_scale, box_out_channels,
+                            head_box_composition, head_lane_composition,
+                            num_lane_anchors_per_scale, lane_out_channels)
     elif output_name == "Efficient":
-        return EfficientOutput(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
+        return EfficientOutput(conv_args, num_anchors_per_scale, box_out_channels,
+                               head_box_composition, head_lane_composition,
+                               num_lane_anchors_per_scale, lane_out_channels)
 
     else:
         raise MyExceptionToCatch(f"[head_factory[ invalid output name : {output_name}")
 
 
 class HeadBase:
-    def __init__(self, conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels):
+    def __init__(self, conv_args,
+                 head_box_composition, head_lane_composition,
+                 num_box_anchors_per_scale, box_out_channels,
+                 num_lane_anchors_per_scale, lane_out_channels):
         self.conv2d = mu.CustomConv2D(kernel_size=3, strides=1, **conv_args)
         self.conv2d_k1 = mu.CustomConv2D(kernel_size=1, strides=1, **conv_args)
         self.conv2d_s2 = mu.CustomConv2D(kernel_size=3, strides=2, **conv_args)
         self.conv2d_k1na = mu.CustomConv2D(kernel_size=1, strides=1, activation=False, bn=False, scope="head")
         self.conv2d_output = mu.CustomConv2D(kernel_size=1, strides=1, activation=False, scope="output", bn=False)
-        self.num_anchors_per_scale = num_anchors_per_scale
-        self.head_composition = head_composition
-        self.num_lane_anchors = num_lane_anchors if num_lane_anchors is not None else None
+        self.head_box_composition = head_box_composition if head_box_composition is not None else None
+        self.head_lane_composition = head_lane_composition if head_lane_composition is not None else None
+        self.num_box_anchors_per_scale = num_box_anchors_per_scale if num_box_anchors_per_scale is not None else None
+        self.box_out_channels = box_out_channels if box_out_channels is not None else None
+        self.num_lane_anchors_per_scale = num_lane_anchors_per_scale if num_lane_anchors_per_scale is not None else None
         self.lane_out_channels = lane_out_channels if lane_out_channels is not None else None
 
     def make_lane_output(self, x, channel):
@@ -41,21 +54,27 @@ class HeadBase:
         spatial_layer = tf.expand_dims(spatial_layer, axis=0)
         x = tf.concat([x, tf.repeat(spatial_layer, batch_mesh, axis=0)], axis=-1)
         x = self.conv2d(x, channel)
-        x = self.conv2d_output(x, self.lane_out_channels * self.num_lane_anchors)
+        x = self.conv2d_output(x, self.lane_out_channels * self.num_lane_anchors_per_scale)
         batch, height, width, _ = x.shape
-        x_5d = tf.reshape(x, (batch, height, width, self.num_lane_anchors,  self.lane_out_channels))
+        x_5d = tf.reshape(x, (batch, height, width, self.num_lane_anchors_per_scale, self.lane_out_channels))
         return x_5d
 
 
 class SingleOutput(HeadBase):
-    def __init__(self, conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels):
-        super().__init__(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
-        self.out_channels = sum(head_composition.values())
+    def __init__(self, conv_args,
+                 head_box_composition, head_lane_composition,
+                 num_box_anchors_per_scale, box_out_channels,
+                 num_lane_anchors_per_scale, lane_out_channels):
+        super().__init__(conv_args,
+                         head_box_composition, head_lane_composition,
+                         num_box_anchors_per_scale, box_out_channels,
+                         num_lane_anchors_per_scale, lane_out_channels)
 
     def __call__(self, input_features):
         output_features = []
-        for feature, channel in zip(input_features, [256, 512, 1024]):
-            output_features.append(self.make_output(feature, channel))
+        if cfg.ModelOutput.BOX_DET:
+            for feature, channel in zip(input_features, [256, 512, 1024]):
+                output_features.append(self.make_output(feature, channel))
 
         if cfg.ModelOutput.LANE_DET:
             conv_lane = self.make_lane_output(input_features[1], 512)
@@ -64,29 +83,36 @@ class SingleOutput(HeadBase):
 
     def make_output(self, x, channel):
         x = self.conv2d(x, channel)
-        x = self.conv2d_output(x, self.num_anchors_per_scale * self.out_channels)
+        x = self.conv2d_output(x, self.num_box_anchors_per_scale * self.box_out_channels)
         batch, height, width, channel = x.shape
-        x_5d = tf.reshape(x, (batch, height, width, self.num_anchors_per_scale, self.out_channels))
+        x_5d = tf.reshape(x, (batch, height, width, self.num_box_anchors_per_scale, self.box_out_channels))
         return x_5d
 
 
 class DoubleOutput(HeadBase):
-    def __init__(self, conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels):
-        super().__init__(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
+    def __init__(self, conv_args,
+                 head_box_composition, head_lane_composition,
+                 num_box_anchors_per_scale, box_out_channels,
+                 num_lane_anchors_per_scale, lane_out_channels):
+        super().__init__(conv_args,
+                         head_box_composition, head_lane_composition,
+                         num_box_anchors_per_scale, box_out_channels,
+                         num_lane_anchors_per_scale, lane_out_channels)
 
     def __call__(self, input_features):
         output_features = list()
-        for feature in input_features:
-            conv_common = self.conv2d_k1(feature, 256)
-            features = []
-            for key, channel in self.head_composition.items():
-                conv_out = self.conv2d(conv_common, 256)
-                conv_out = self.conv2d(conv_out, 256)
-                feat = self.conv2d_k1na(conv_out, channel * self.num_anchors_per_scale)
-                features.append(feat)
-            b, h, w, c = features[0].shape
-            output_feature = tf.concat(features, axis=-1)
-            output_features.append(tf.reshape(output_feature, (b, h, w, self.num_anchors_per_scale, -1)))
+        if cfg.ModelOutput.BOX_DET:
+            for feature in input_features:
+                conv_common = self.conv2d_k1(feature, 256)
+                features = []
+                for key, channel in self.head_box_composition.items():
+                    conv_out = self.conv2d(conv_common, 256)
+                    conv_out = self.conv2d(conv_out, 256)
+                    feat = self.conv2d_k1na(conv_out, channel * self.num_box_anchors_per_scale)
+                    features.append(feat)
+                b, h, w, c = features[0].shape
+                output_feature = tf.concat(features, axis=-1)
+                output_features.append(tf.reshape(output_feature, (b, h, w, self.num_box_anchors_per_scale, -1)))
 
         if cfg.ModelOutput.LANE_DET:
             conv_lane = self.make_lane_output(input_features[1], 512)
@@ -95,9 +121,14 @@ class DoubleOutput(HeadBase):
 
 
 class EfficientOutput(HeadBase):
-    def __init__(self, conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels,
-                 ):
-        super().__init__(conv_args, num_anchors_per_scale, head_composition, num_lane_anchors, lane_out_channels)
+    def __init__(self, conv_args,
+                 head_box_composition, head_lane_composition,
+                 num_box_anchors_per_scale, box_out_channels,
+                 num_lane_anchors_per_scale, lane_out_channels):
+        super().__init__(conv_args,
+                         head_box_composition, head_lane_composition,
+                         num_box_anchors_per_scale, box_out_channels,
+                         num_lane_anchors_per_scale, lane_out_channels)
         separable_conv = cfg.Architecture.Efficientnet.Separable
         if separable_conv:
             kernel_initializer = {"depthwise_initializer": tf.keras.initializers.VarianceScaling(),

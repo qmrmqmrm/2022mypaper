@@ -16,19 +16,17 @@ class PreprocessBase:
 
 
 class ExamplePreprocess(PreprocessBase):
-    def __init__(self, target_hw, dataset_cfg, max_bbox, max_lane, max_lpoints, max_dontcare, min_pix, lane_min_pix, category_names):
-        self.preprocess = [ExampleCropper(target_hw, dataset_cfg.INCLUDE_LANE, dataset_cfg.CROP_TLBR),
-                           ExampleResizer(target_hw, dataset_cfg.INCLUDE_LANE),   # box in pixel scale
-                           ExampleMinPixel(min_pix),
-                           ExampleBoxScaler(),                                    # box in (0~1) scale
-                           ExampleZeroPadBbox(max_bbox),
-                           ExampleZeroPadDontCare(max_dontcare),
+    def __init__(self, target_hw, dataset_cfg, max_lane, max_lpoints, lane_min_pix, category_names):
+        self.preprocess = [ExampleCropper(target_hw, dataset_cfg.CROP_TLBR),
+                           ExampleResizer(target_hw),   # box in pixel scale
+                           # ExampleMinPixel(min_pix),
+                           # ExampleBoxScaler(),                                    # box in (0~1) scale
+                           # ExampleZeroPadBbox(max_bbox),
+                           # ExampleZeroPadDontCare(max_dontcare),
+                           ExampleLaneParams(category_names, max_lane, max_lpoints, lane_min_pix),
+                           ExampleLaneScaler(),
+                           ExampleZeroPadLane(max_lane, max_lpoints)
                            ]
-        if dataset_cfg.INCLUDE_LANE:
-            self.preprocess.extend([ExampleLaneParams(category_names, max_lane, max_lpoints, lane_min_pix),
-                                    ExampleLaneScaler(),
-                                    ExampleZeroPadLane(max_lane, max_lpoints)]
-                                   )
 
     def __call__(self, example):
         for process in self.preprocess:
@@ -42,20 +40,19 @@ class ExampleCropper(PreprocessBase):
     adjust boxes to be consistent with the cropped image
     """
 
-    def __init__(self, target_hw, include_lane, crop_offset=None):
+    def __init__(self, target_hw, crop_offset=None):
         # target image aspect ratio: width / height
         self.target_hw_ratio = target_hw[1] / target_hw[0]
         # crop offset: dy1, dx1, dy2, dx2 (top, left, bottom, right)
         self.crop_offset = [0, 0, 0, 0] if crop_offset is None else crop_offset
-        self.include_lane = include_lane
 
     def __call__(self, example: dict):
         source_hw = example["image"].shape[:2]
         crop_tlbr = self.find_crop_range(source_hw)
         example["image"] = self.crop_image(example["image"], crop_tlbr)
-        example["inst_box"] = self.crop_bboxes(example["inst_box"], crop_tlbr)
-        if self.include_lane:
-            example = ExampleLaneCropper(crop_tlbr)(example)
+        # example["inst_box"] = self.crop_bboxes(example["inst_box"], crop_tlbr)
+        example = ExampleLaneCropper(crop_tlbr)(example)
+
         return example
 
     def find_crop_range(self, src_hw):  # example:
@@ -102,9 +99,8 @@ class ExampleCropper(PreprocessBase):
 
 
 class ExampleResizer(PreprocessBase):
-    def __init__(self, target_hw, include_lane):
+    def __init__(self, target_hw):
         self.target_hw = np.array(target_hw, dtype=np.float32)
-        self.include_lane = include_lane
 
     def __call__(self, example):
         source_hw = np.array(example["image"].shape[:2], dtype=np.float32)
@@ -113,13 +109,8 @@ class ExampleResizer(PreprocessBase):
         # resize image
         image = cv2.resize(example["image"],
                            (self.target_hw[1].astype(np.int32), self.target_hw[0].astype(np.int32)))  # (256, 832)
-        bboxes = example["inst_box"].astype(np.float32)
-        # rescale yxhw
-        bboxes[:, :4] *= resize_ratio
         example["image"] = image
-        example["inst_box"] = bboxes
-        if self.include_lane and example["lanes_point"]:
-            example["lanes_point"] = [lane * resize_ratio for lane in example["lanes_point"]]
+        example["lanes_point"] = [lane * resize_ratio for lane in example["lanes_point"]]
         return example
 
 

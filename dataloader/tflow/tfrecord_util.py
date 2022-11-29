@@ -71,6 +71,8 @@ def read_data_config(key, value):
             decode_type = "tf.int32"
         elif value.dtype == np.float32:
             decode_type = "tf.float32"
+        elif value.dtype == np.float32:
+            decode_type = "tf.string"
         else:
             assert 0, f"[read_data_config] Wrong numpy type: {value.dtype}, key={key}"
         parse_type = "tf.string"

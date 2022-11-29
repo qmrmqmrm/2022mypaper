@@ -7,15 +7,15 @@ import model.framework.model_util as mu
 import utils.framework.util_function as uf
 
 
-def neck_factory(head, conv_args, training, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels):
+def neck_factory(head, conv_args, training, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels):
     if head == "FPN":
-        return FPN(conv_args, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+        return FPN(conv_args, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels)
     elif head == "PAN":
-        return PAN(conv_args, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+        return PAN(conv_args, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels)
     elif head == "PPFPN":
-        return PPFPN(conv_args, training, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+        return PPFPN(conv_args, training, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels)
     elif head == "BiFPN":
-        return BiFPN(conv_args, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+        return BiFPN(conv_args, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels)
     else:
         raise MyExceptionToCatch(f"[backbone_factory] invalid backbone name: {head}")
 
@@ -100,8 +100,8 @@ class FPN(NeckBase):
 
 
 class PPFPN(NeckBase):
-    def __init__(self, model_cfg, training, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels):
-        super().__init__(model_cfg, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+    def __init__(self, model_cfg, training, num_anchors_per_scale, box_out_channels, num_lane_anchors, lane_out_channels):
+        super().__init__(model_cfg, num_anchors_per_scale, box_out_channels, num_lane_anchors, lane_out_channels)
         self.training = training
         self.pool1 = tf.keras.layers.MaxPool2D(pool_size=(5, 5), padding='same', strides=(1, 1))
         self.pool2 = tf.keras.layers.MaxPool2D(pool_size=(9, 9), padding='same', strides=(1, 1))
@@ -170,8 +170,8 @@ class PPFPN(NeckBase):
 
 
 class PAN(NeckBase):
-    def __init__(self, model_cfg, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels):
-        super().__init__(model_cfg, num_anchors_per_scale, out_channels, num_lane_anchors, lane_out_channels)
+    def __init__(self, model_cfg, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels):
+        super().__init__(model_cfg, num_box_anchors_per_scale, out_channels, num_lane_anchors_per_scale, lane_out_channels)
         self.pool1 = tf.keras.layers.MaxPool2D(pool_size=(5, 5), padding='same', strides=(1, 1))
         self.pool2 = tf.keras.layers.MaxPool2D(pool_size=(9, 9), padding='same', strides=(1, 1))
         self.pool3 = tf.keras.layers.MaxPool2D(pool_size=(13, 13), padding='same', strides=(1, 1))

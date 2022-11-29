@@ -6,16 +6,16 @@ import config as cfg
 
 def get_channel_composition(is_gt: bool):
     if is_gt:
-        return cfg.ModelOutput.GRTR_FMAP_COMPOSITION
+        return cfg.ModelOutput.GRTR_FMAP_BOX_COMPOSITION
     else:
-        return cfg.ModelOutput.PRED_FMAP_COMPOSITION
+        return cfg.ModelOutput.PRED_FMAP_BOX_COMPOSITION
 
 
 def get_bbox_composition(is_gt: bool):
     if is_gt:
-        return cfg.ModelOutput.GRTR_INST_COMPOSITION
+        return cfg.ModelOutput.GRTR_INST_BOX_COMPOSITION
     else:
-        return cfg.ModelOutput.PRED_INST_COMPOSITION
+        return cfg.ModelOutput.PRED_INST_BOX_COMPOSITION
 
 
 def get_lane_channel_composition(is_gt: bool):

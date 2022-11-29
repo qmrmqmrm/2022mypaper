@@ -21,13 +21,14 @@ class HistoryLog:
         result = dict()
         for key, log_object in self.loggers.items():
             result[key] = log_object(grtr, pred, loss)
-        num_ctgr = pred["feat_box"]["category"][0].shape[-1]
-        metric = count_true_positives(grtr["inst_box"], pred["inst_box"], grtr["inst_dc"], num_ctgr)
+        if cfg.ModelOutput.BOX_DET:
+            num_ctgr = pred["feat_box"]["category"][0].shape[-1]
+            metric = count_true_positives(grtr["inst_box"], pred["inst_box"], grtr["inst_dc"], num_ctgr)
 
-        result.update({"total_loss": total_loss.numpy()})
-        result.update(metric)
+            result.update({"total_loss": total_loss.numpy()})
+            result.update(metric)
 
-        result["dist_diff"] = self.distance_diff(grtr, pred)
+            result["dist_diff"] = self.distance_diff(grtr, pred)
         # TODO: add metric lane
         if cfg.ModelOutput.LANE_DET:
             num_lane_ctgr = pred["feat_lane"]["lane_category"][0].shape[-1]
@@ -140,16 +141,23 @@ class HistoryLog:
     def make_summary(self, epoch_time):
         mean_result = self.data.mean(axis=0).to_dict()
         sum_result_ = self.data.sum(axis=0).to_dict()
-        sum_result = {"recall": sum_result_["trpo"] / (sum_result_["grtr"] + 1e-5),
-                      "precision": sum_result_["trpo"] / (sum_result_["pred"] + 1e-5),
-                      }
-        metric_keys = ["trpo", "grtr", "pred", ]
+        sum_result = {}
+        metric_keys = []
+        if cfg.ModelOutput.BOX_DET:
+            sum_result.update({"recall": sum_result_["trpo"] / (sum_result_["grtr"] + 1e-5),
+                          "precision": sum_result_["trpo"] / (sum_result_["pred"] + 1e-5),
+                          })
+
+            metric_keys.extend(["trpo", "grtr", "pred"])
 
         if cfg.ModelOutput.LANE_DET:
             sum_result.update({"recall_lane": sum_result_["trpo_lane"] / (sum_result_["grtr_lane"] + 1e-5),
                                "precision_lane": sum_result_["trpo_lane"] / (sum_result_["pred_lane"] + 1e-5)
                                })
-            metric_keys.extend(["trpo_lane", "grtr_lane", "pred_lane", ])
+            sum_result.update({"f1": (2 * sum_result["recall_lane"] * sum_result["precision_lane"]) / (
+                        sum_result["recall_lane"] + sum_result["precision_lane"])
+                          })
+            metric_keys.extend(["trpo_lane", "grtr_lane", "pred_lane"])
         summary = {key: val for key, val in mean_result.items() if key not in metric_keys}
         summary.update(sum_result)
         summary["time_m"] = round(epoch_time, 5)
