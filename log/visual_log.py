@@ -243,7 +243,7 @@ class VisualLog:
 
             xys = list()
             for index in range(len(point) - 1):
-                alpha = (point[index + 1, 0] - point[index, 0]) / (point[index + 1, 1] - point[index, 1])
+                alpha = (point[index + 1, 0] - point[index, 0]) / (point[index + 1, 1] - point[index, 1]+1e-10)
                 beta = point[index, 0] - alpha * point[index, 1]
                 mask = (self.y_axis < point[index, 0]) * (self.y_axis > point[index + 1, 0])
                 y = self.y_axis[mask]

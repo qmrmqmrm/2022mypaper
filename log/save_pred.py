@@ -59,7 +59,7 @@ class SavePred:
 
                 xys = list()
                 for index in range(len(fpoints) - 1):
-                    alpha = (fpoints[index + 1, 0] - fpoints[index, 0]) / (fpoints[index + 1, 1] - fpoints[index, 1])
+                    alpha = (fpoints[index + 1, 0] - fpoints[index, 0]) / (fpoints[index + 1, 1] - fpoints[index, 1]+1e-10)
                     beta = fpoints[index, 0] - alpha * fpoints[index, 1]
                     mask = (self.y_axis < fpoints[index, 0]) * (self.y_axis > fpoints[index + 1, 0])
                     y = self.y_axis[mask]

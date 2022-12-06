@@ -165,7 +165,7 @@ class TrainParams:
     @classmethod
     def get_pred_lane_composition(cls,  categorized=False):
         cls_composition = {"lane_category": len(TfrParams.CATEGORY_NAMES["lane"])}
-        reg_composition = {"laneness": 1, "lane_fpoints": 10, "lane_centerness": 1}
+        reg_composition = {"laneness": 1, "lane_fpoints": 20, "lane_centerness": 1}
 
         composition = {"reg": reg_composition, "cls": cls_composition}
 

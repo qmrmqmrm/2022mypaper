@@ -16,16 +16,16 @@ class PreprocessBase:
 
 
 class ExamplePreprocess(PreprocessBase):
-    def __init__(self, target_hw, dataset_cfg, max_lane, max_lpoints, lane_min_pix, category_names):
+    def __init__(self, target_hw, dataset_cfg, max_lane, max_lpoints, lane_min_pix, num_lane, category_names):
         self.preprocess = [ExampleCropper(target_hw, dataset_cfg.CROP_TLBR),
                            ExampleResizer(target_hw),   # box in pixel scale
                            # ExampleMinPixel(min_pix),
                            # ExampleBoxScaler(),                                    # box in (0~1) scale
                            # ExampleZeroPadBbox(max_bbox),
                            # ExampleZeroPadDontCare(max_dontcare),
-                           ExampleLaneParams(category_names, max_lane, max_lpoints, lane_min_pix),
-                           ExampleLaneScaler(),
-                           ExampleZeroPadLane(max_lane, max_lpoints)
+                           ExampleLaneParams(category_names, max_lane, max_lpoints, lane_min_pix, num_lane),
+                           ExampleLaneScaler(num_lane),
+                           ExampleZeroPadLane(max_lane, max_lpoints, num_lane)
                            ]
 
     def __call__(self, example):
@@ -204,10 +204,11 @@ class ExampleMinPixel(PreprocessBase):
 
 
 class ExampleLaneParams(PreprocessBase):
-    def __init__(self, category_names, max_lane, max_lpoints, lane_min_pix):
+    def __init__(self, category_names, max_lane, max_lpoints, lane_min_pix, num_lane):
         self.category_names = category_names
         self._max_lpoints = max_lpoints
         self.max_lane = max_lane
+        self.num_lane = num_lane
         self.lane_points_num = 0
         self.lane_min_pix = list(lane_min_pix.values())
 
@@ -224,7 +225,7 @@ class ExampleLaneParams(PreprocessBase):
             fpoints_dc = []
             cate_dc = []
             for i, lane_points in enumerate(lanes_point):
-                points, lane_length = self.get_five_points(lane_points)
+                points, lane_length = self.get_num_points(lane_points)
                 if lane_length > self.lane_min_pix[lanes_type[i]]:
                     new_lanes_point.append(lanes_point[i])
                     five_points.append(points)
@@ -234,10 +235,10 @@ class ExampleLaneParams(PreprocessBase):
                     fpoints_dc.append(points)
                     cate_dc.append(-1)
             five_points = np.array(five_points)  # (N,5,2)
-            five_points = five_points.reshape(-1, 10)  # (N,10)
+            five_points = five_points.reshape(-1, self.num_lane * 2)  # (N,10)
 
             fpoints_dc = np.array(fpoints_dc)  # (N,5,2)
-            fpoints_dc = fpoints_dc.reshape(-1, 10)  # (N,10)
+            fpoints_dc = fpoints_dc.reshape(-1, self.num_lane * 2)  # (N,10)
 
             lanes_type = np.array(categorys).reshape(-1, 1)
             lanes_type_dc = np.array(cate_dc).reshape(-1, 1)
@@ -252,14 +253,26 @@ class ExampleLaneParams(PreprocessBase):
         del example["lanes_type"]
         return example
 
-    def get_five_points(self, lane_points):
+    def get_num_points(self, lane_points):
         lane_length = self.get_points_length(lane_points)
-        center_point, center_ind = self.get_center_points(lane_points, lane_length / 2, 0, len(lane_points))
-        lane_points = np.insert(lane_points, center_ind, center_point, axis=0)
-        second_point, second_ind = self.get_center_points(lane_points, lane_length / 4, 0, len(lane_points))
-        fourth_point, fourth_ind = self.get_center_points(lane_points, lane_length / 4, center_ind, len(lane_points))
-        five_points = np.stack([lane_points[0], second_point, center_point, fourth_point, lane_points[-1]], axis=0)
-        return five_points, lane_length
+        num_points  = []
+
+        for num in range(self.num_lane - 1):
+            points, index = self.get_center_points(lane_points, lane_length/(self.num_lane - 1) * num, 0, len(lane_points))
+            num_points.append(points)
+
+        num_points = np.stack(num_points, axis=0)
+        num_points = np.concatenate([num_points, lane_points[-1:]], axis=0)
+
+
+        #
+        # lane_length = self.get_points_length(lane_points)
+        # center_point, center_ind = self.get_center_points(lane_points, lane_length / 2, 0, len(lane_points))
+        # lane_points = np.insert(lane_points, center_ind, center_point, axis=0)
+        # second_point, second_ind = self.get_center_points(lane_points, lane_length / 4, 0, len(lane_points))
+        # fourth_point, fourth_ind = self.get_center_points(lane_points, lane_length / 4, center_ind, len(lane_points))
+        # five_points = np.stack([lane_points[0], second_point, center_point, fourth_point, lane_points[-1]], axis=0)
+        return num_points, lane_length
 
     def get_points_length(self, lane_points):
         points_length = 0
@@ -380,6 +393,8 @@ class ExampleLaneScaler(PreprocessBase):
     """
     scale bounding boxes into (0~1)
     """
+    def __init__(self, num_lane):
+        self.num_lane = num_lane
 
     def __call__(self, example):
         height, width = example["image"].shape[:2]
@@ -396,29 +411,30 @@ class ExampleLaneScaler(PreprocessBase):
             lane /= np.array([[height, width]])
         example["lanes_point_dc"] = lanes_point_dc
 
-        five_points = example["inst_lane"][:, :10]
-        five_points_remainder = example["inst_lane"][:, 10:]
-        five_points = five_points.reshape(-1, 5, 2) / np.array([[height, width]])
-        example["inst_lane"] = np.concatenate([five_points.reshape(-1, 10), five_points_remainder], axis=1)
+        five_points = example["inst_lane"][:, : self.num_lane*2]
+        five_points_remainder = example["inst_lane"][:, self.num_lane*2:]
+        five_points = five_points.reshape(-1, self.num_lane, 2) / np.array([[height, width]])
+        example["inst_lane"] = np.concatenate([five_points.reshape(-1, self.num_lane*2), five_points_remainder], axis=1)
 
-        fpoints_dc = example["inst_ldc"][:, :10]
-        fpoints_dc_remainder = example["inst_ldc"][:, 10:]
-        fpoints_dc = fpoints_dc.reshape(-1, 5, 2) / np.array([[height, width]])
-        example["inst_ldc"] = np.concatenate([fpoints_dc.reshape(-1, 10), fpoints_dc_remainder], axis=1)
+        fpoints_dc = example["inst_ldc"][:, :self.num_lane*2]
+        fpoints_dc_remainder = example["inst_ldc"][:, self.num_lane*2:]
+        fpoints_dc = fpoints_dc.reshape(-1, self.num_lane, 2) / np.array([[height, width]])
+        example["inst_ldc"] = np.concatenate([fpoints_dc.reshape(-1, self.num_lane*2), fpoints_dc_remainder], axis=1)
         return example
 
 
 class ExampleZeroPadLane(PreprocessBase):
-    def __init__(self, max_lane, max_lpoints):
+    def __init__(self, max_lane, max_lpoints, num_lane):
         self._max_lane = max_lane
         self._max_lpoints = max_lpoints
+        self.num_lane = num_lane
 
     def __call__(self, example):
         new_lanes_point = np.zeros((self._max_lane, self._max_lpoints, 2), dtype=np.float32)
         new_lanes_point_dc = np.zeros((self._max_lane, self._max_lpoints, 2), dtype=np.float32)
-        new_lanes = np.zeros((self._max_lane, 12), dtype=np.float32)
+        new_lanes = np.zeros((self._max_lane, self.num_lane*2 +2), dtype=np.float32)
 
-        new_lanes_dc = np.zeros((self._max_lane, 12), dtype=np.float32)
+        new_lanes_dc = np.zeros((self._max_lane,  self.num_lane*2 +2), dtype=np.float32)
 
         if example["lanes_point"]:
             example["lanes_point"] = example["lanes_point"][:self._max_lane][:self._max_lpoints]

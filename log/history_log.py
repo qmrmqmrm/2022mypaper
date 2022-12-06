@@ -21,11 +21,10 @@ class HistoryLog:
         result = dict()
         for key, log_object in self.loggers.items():
             result[key] = log_object(grtr, pred, loss)
+        result.update({"total_loss": total_loss.numpy()})
         if cfg.ModelOutput.BOX_DET:
             num_ctgr = pred["feat_box"]["category"][0].shape[-1]
             metric = count_true_positives(grtr["inst_box"], pred["inst_box"], grtr["inst_dc"], num_ctgr)
-
-            result.update({"total_loss": total_loss.numpy()})
             result.update(metric)
 
             result["dist_diff"] = self.distance_diff(grtr, pred)
