@@ -84,6 +84,7 @@ class Uplus2Params:
 
 
 class TfrParams:
+    NUM_LANE_POINT = 5
     MIN_PIX = {
         'train': {"Bgd": 0, "Pedestrian": 86, "Car": 110, "Truck": 124, "Bus": 230, "Motorcycle": 48,
                   "Traffic light": 52, "Traffic sign": 33, "Road mark": 30, "Bicycle": 48,
@@ -147,7 +148,7 @@ class TrainParams:
     @classmethod
     def get_pred_lane_composition(cls,  categorized=False):
         cls_composition = {"lane_category": len(TfrParams.CATEGORY_NAMES["lane"])}
-        reg_composition = {"laneness": 1, "lane_fpoints": 10, "lane_centerness": 1}
+        reg_composition = {"laneness": 1, "lane_fpoints": TfrParams.NUM_LANE_POINT * 2, "lane_centerness": 1}
 
         composition = {"reg": reg_composition, "cls": cls_composition}
 

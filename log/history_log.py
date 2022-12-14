@@ -25,9 +25,7 @@ class HistoryLog:
         if cfg.ModelOutput.BOX_DET:
             num_ctgr = pred["feat_box"]["category"][0].shape[-1]
             metric = count_true_positives(grtr["inst_box"], pred["inst_box"], grtr["inst_dc"], num_ctgr)
-
-
-
+            result.update(metric)
             result["dist_diff"] = self.distance_diff(grtr, pred)
         # TODO: add metric lane
         if cfg.ModelOutput.LANE_DET:

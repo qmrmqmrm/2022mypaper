@@ -13,7 +13,9 @@ class ExampleMaker:
                  feat_scales=cfg.ModelOutput.FEATURE_SCALES,
                  category_names=cfg.Dataloader.CATEGORY_NAMES,
                  max_lane=cfg.Dataloader.MAX_LANE_PER_IMAGE,
-                 max_lpoints=cfg.Dataloader.MAX_POINTS_PER_LANE):
+                 max_lpoints=cfg.Dataloader.MAX_POINTS_PER_LANE,
+                 num_lane=cfg.Dataloader.NUM_LANE_POINT
+                 ):
         self.data_reader = data_reader
         self.feat_scales = feat_scales
         self.category_names = category_names
@@ -21,11 +23,13 @@ class ExampleMaker:
         self.tfr_drive_path = tfr_drive_path
         self.save_image = True
         self.image_mean = 0
+        self.num_lane =num_lane
         self.preprocess_example = pr.ExamplePreprocess(target_hw=dataset_cfg.INPUT_RESOLUTION,
                                                        dataset_cfg=dataset_cfg,
                                                        max_lane=max_lane,
                                                        max_lpoints=max_lpoints,
                                                        lane_min_pix=cfg.Dataloader.LANE_MIN_PIX[split],
+                                                       num_lane=num_lane,
                                                        category_names=category_names
                                                        )
 
@@ -66,7 +70,7 @@ class ExampleMaker:
         # else:
         #     pass
 
-        image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.category_names)
+        image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.num_lane)
         cv2.imshow("image with feature bboxes", image)
         cv2.waitKey(1)
         if self.save_image:

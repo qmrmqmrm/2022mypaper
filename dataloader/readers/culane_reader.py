@@ -15,12 +15,6 @@ class CULaneDriveManager(DriveManagerBase):
         super().__init__(datapath, split)
 
     def list_drive_paths(self):
-        kitti_split = "train"  # if self.split == "train" else "testing"
-        # dirlist = glob(op.join(self.datapath))
-        # # testset_file = op.join(self.datapath, "list", f'{kitti_split}.txt')
-        # dirlist = self.push_list(testset_file)
-        # dirlist.sort()
-        # dirlist = self.datapath + testset_file
         return [self.datapath]
 
     def get_drive_name(self, drive_index):
@@ -116,10 +110,6 @@ class CULaneReader(DatasetReaderBase):
     def get_grad(self, lpoints):
         grad = lpoints[1] - lpoints[0]
         return grad[1] / grad[0]
-
-    def get_intersection_x(self, lpoints):
-
-        return x
 
 
 # ==================================================

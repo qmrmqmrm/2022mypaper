@@ -71,7 +71,7 @@ def check_locations_in_grid(locations, grid_ratio):
     return feat_location_pixs
 
 
-def draw_lanes(image, lanes_point, lanes, category_names):
+def draw_lanes(image, lanes_point, lanes, num_lane):
     image = image.copy()
     height, width = image.shape[:2]
     category_color = [[0,0,0],[255,0,0],[0,255,0], [0,0,255], [255,0,255]]
@@ -81,7 +81,7 @@ def draw_lanes(image, lanes_point, lanes, category_names):
         for i in range(lane_points.shape[0]):
             cv2.circle(image, (int(lane_points[i, 1]), int(lane_points[i, 0])), 1, ([0,255,255]), 6)
     for lane in lanes:
-        five_points = lane[:10].reshape(-1, 2) * np.array([height, width])
+        five_points = lane[:num_lane*2].reshape(-1, 2) * np.array([height, width])
         for i in range(five_points.shape[0]):
             cv2.circle(image, (int(five_points[i, 1]), int(five_points[i, 0])), 1, category_color[ int(lane[-1])], 6)
 

@@ -4,11 +4,11 @@ import numpy as np
 
 
 class Paths:
-    RESULT_ROOT = "/home/cheetah/kim_workspace"
-    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord"
+    RESULT_ROOT = "/home/dolphin/kim_workspace"
+    DATAPATH = "/media/dolphin/intHDD/culane/tfrecord"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
-    CONFIG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config.py'
-    META_CFG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config_dir/meta_config.py'
+    CONFIG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config.py'
+    META_CFG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config_dir/meta_config.py'
 
 
 class Datasets:
@@ -26,7 +26,7 @@ class Datasets:
 
     class Culane:
         NAME = "culane"
-        PATH = "/media/cheetah/IntHDD/datasets/culane"
+        PATH = "/media/dolphin/intHDD/culane"
         CATEGORIES_TO_USE = ["Lane1, Lane2, Lane3, Lane4"]
         CATEGORY_REMAP = {}
         # INPUT_RESOLUTION = (590, 1640)
@@ -114,6 +114,7 @@ class Dataloader:
     MAX_DONT_PER_IMAGE = 100
     MAX_LANE_PER_IMAGE = 4
     MAX_POINTS_PER_LANE = 50
+    NUM_LANE_POINT = params.TfrParams.NUM_LANE_POINT
 
     CATEGORY_NAMES = params.TfrParams.CATEGORY_NAMES
     SHARD_SIZE = 2000
@@ -144,12 +145,12 @@ class ModelOutput:
     NUM_BOX_MAIN_CHANNELS = sum(PRED_FMAP_BOX_COMPOSITION.values())
 
     NUM_LANE_ANCHORS_PER_SCALE = 1
-    GRTR_FMAP_LANE_COMPOSITION = {"laneness": 1,  "lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
+    GRTR_FMAP_LANE_COMPOSITION = {"laneness": 1,  "lane_fpoints": params.TfrParams.NUM_LANE_POINT *2, "lane_centerness": 1, "lane_category": 1}
     PRED_FMAP_LANE_COMPOSITION =  params.TrainParams.get_pred_lane_composition(False)
     HEAD_LANE_COMPOSITION = params.TrainParams.get_pred_lane_composition(True)
 
-    GRTR_INST_LANE_COMPOSITION = {"lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
-    PRED_INST_LANE_COMPOSITION = {"lane_fpoints": 10, "lane_centerness": 1, "lane_category": 1}
+    GRTR_INST_LANE_COMPOSITION = {"lane_fpoints": params.TfrParams.NUM_LANE_POINT *2, "lane_centerness": 1, "lane_category": 1}
+    PRED_INST_LANE_COMPOSITION = {"lane_fpoints": params.TfrParams.NUM_LANE_POINT *2, "lane_centerness": 1, "lane_category": 1}
     NUM_LANE_MAIN_CHANNELS = sum(PRED_FMAP_LANE_COMPOSITION.values())
 
 
