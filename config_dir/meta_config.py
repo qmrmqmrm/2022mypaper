@@ -106,7 +106,7 @@ class Dataloader:
     DATASETS_FOR_TFRECORD = {
         # "kitti": ("train", "val"),
         # "uplus": ( "val"),
-        "culane": ("train", "val", "test"),
+        "culane": ("train","val"),
         # "city": ("train", "val"),
         # "a2d2": ("train", "val"),
     }
@@ -182,11 +182,11 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v2"
+    CKPT_NAME = "culane_v4_no_night"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
-    DATA_BATCH_SIZE = 16
+    DATA_BATCH_SIZE = 2
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN

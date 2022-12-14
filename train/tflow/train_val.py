@@ -41,10 +41,9 @@ class TrainValBase:
                 if "map" not in key:
                     print_loss = print_loss + f"{key}={loss_by_type[key]:.3f}, "
             uf.print_progress(print_loss)
-
             if step >= self.epoch_steps:
                 break
-            # if step >= 100:
+            # if step >= 10:
             #     break
 
         print("")

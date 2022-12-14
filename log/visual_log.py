@@ -18,7 +18,7 @@ class VisualLog:
             os.makedirs(self.vlog_path)
         if not op.isdir(self.visual_heatmap_path):
             os.makedirs(self.visual_heatmap_path)
-        self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, "test")
+        self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, "val")
         self.image_files.sort()
         self.y_axis = np.arange(600, 200, -10)
         self.crop_tlbr = cfg.Datasets.DATASET_CONFIG.CROP_TLBR
@@ -64,6 +64,8 @@ class VisualLog:
         batch = cfg.Train.DATA_BATCH_SIZE
 
         for i in range(batch):
+            # if step >114 and i >1:
+            #     a =1
             # grtr_log_keys = ["pred_object", "pred_ctgr_prob", "pred_score", "distance"]
             image_file = self.image_files[step * batch + i]
             image_grtr_orgin = cv2.imread(image_file)
@@ -97,7 +99,6 @@ class VisualLog:
                 image_grtr = self.draw_lanes(image_grtr, splits_lane['grtr_fn'], i, (0, 0, 255))
                 image_grtr_orgin = self.draw_30_lanes(image_grtr_orgin, splits_lane['grtr_tp'], i, (0, 255, 255), image_grtr.shape)
                 image_grtr_orgin = self.draw_30_lanes(image_grtr_orgin, splits_lane['grtr_fn'], i, (255, 0, 255), image_grtr.shape)
-
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_tp"], i, (0, 255, 0))
                 image_pred = self.draw_lanes(image_pred, splits_lane["pred_fp"], i, (0, 0, 255))
                 image_pred_orgin = self.draw_30_lanes(image_pred_orgin, splits_lane["pred_tp"], i, (0, 255, 0), image_grtr.shape)
@@ -239,11 +240,12 @@ class VisualLog:
         category = category[valid_mask, 0]
 
         for n in range(fpoints.shape[0]):
-            point = (fpoints[n].reshape(-1, 2) * np.array([height, width])).astype(np.int32) + np.array([self.crop_tlbr[0], self.crop_tlbr[1]])
+            point_ = (fpoints[n].reshape(-1, 2) * np.array([height, width])).astype(np.int32)
+            point = point_ + np.array([self.crop_tlbr[0], self.crop_tlbr[1]])
 
             xys = list()
             for index in range(len(point) - 1):
-                alpha = (point[index + 1, 0] - point[index, 0]) / (point[index + 1, 1] - point[index, 1])
+                alpha = (point[index + 1, 0] - point[index, 0]) / (point[index + 1, 1] - point[index, 1]+1e-10)
                 beta = point[index, 0] - alpha * point[index, 1]
                 mask = (self.y_axis < point[index, 0]) * (self.y_axis > point[index + 1, 0])
                 y = self.y_axis[mask]

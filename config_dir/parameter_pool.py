@@ -2,10 +2,10 @@ import numpy as np
 
 
 class LossComb:
-    CULANE_WEIGHT = {"laneness": (3., "LanenessLoss", 1, 1),
+    CULANE_WEIGHT = {"laneness": (1., "LanenessLoss", 1, 1),
                          "lane_fpoints": (10000., "FpointLoss"),
-                         "lane_centerness": (5., "CenternessLoss", 3, 1),
-                         "lane_category": (10., "LaneCategLoss")}
+                         "lane_centerness": (1., "CenternessLoss", 1, 1),
+                         "lane_category": (1., "LaneCategLoss")}
 
     FULL_COMBINATION = {"lane": CULANE_WEIGHT}
 
@@ -13,9 +13,14 @@ class LossComb:
 class TrainingPlan:
     UPLUS_PLAN = [
         # ("uplus", 1, 0.0000001, LossComb.FULL_COMBINATION, True),
-        ("culane", 40, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 40, 0.00001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 40, 0.000001, LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.002,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.003,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.004,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.0002,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.0003,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.0004,  LossComb.FULL_COMBINATION, True),
     ]
 
 
@@ -79,29 +84,6 @@ class Uplus2Params:
 
 
 class TfrParams:
-    # # [300 0 0 0] crop 픽셀 50% Road makr 30
-    # MIN_PIX = {
-    #     'train': {"Bgd": 0, "Pedestrian": 68, "Rider": 54, "Car": 87, "Truck": 98, "Bus": 150, "Motorcycle": 38,
-    #               "Traffic light": 41, "Pedestrian light": 30, "Traffic sign": 26, "Road mark": 20, "Bicycle": 38,
-    #               "Cone": 34, "Lane_stick": 30, "Bump": 75, "Pothole": 0
-    #               },
-    #     'val': {"Bgd": 0, "Pedestrian": 76, "Rider": 60, "Car": 98, "Truck": 110, "Bus": 168, "Motorcycle": 42,
-    #             "Traffic light": 46, "Pedestrian light": 34, "Traffic sign": 29, "Road mark": 20, "Bicycle": 42,
-    #             "Cone": 38, "Lane_stick": 34, "Bump": 85, "Pothole": 0
-    #             },
-    # }
-
-    # # [450, 180, 25, 180] crop 픽셀 80% Road makr 30
-    # MIN_PIX = {
-    #     'train': {"Bgd": 0, "Pedestrian": 86, "Rider": 48, "Car": 110, "Truck": 124, "Bus": 230, "Motorcycle": 48,
-    #               "Traffic light": 52, "Pedestrian light": 38, "Traffic sign": 33, "Road mark": 30, "Bicycle": 48,
-    #               "Cone": 43, "Lane_stick": 38, "Bump": 96, "Pothole": 0
-    #               },
-    #     'val': {"Bgd": 0, "Pedestrian": 97, "Rider": 54, "Car": 124, "Truck": 140, "Bus": 259, "Motorcycle": 54,
-    #             "Traffic light": 59, "Pedestrian light": 43, "Traffic sign": 37, "Road mark": 30, "Bicycle": 54,
-    #             "Cone": 48, "Lane_stick": 43, "Bump": 108, "Pothole": 0
-    #             },
-    # }
     MIN_PIX = {
         'train': {"Bgd": 0, "Pedestrian": 86, "Car": 110, "Truck": 124, "Bus": 230, "Motorcycle": 48,
                   "Traffic light": 52, "Traffic sign": 33, "Road mark": 30, "Bicycle": 48,

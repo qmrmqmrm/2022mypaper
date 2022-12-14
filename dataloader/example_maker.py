@@ -19,7 +19,8 @@ class ExampleMaker:
         self.category_names = category_names
         self.include_lane = dataset_cfg.INCLUDE_LANE
         self.tfr_drive_path = tfr_drive_path
-        self.save_image = False
+        self.save_image = True
+        self.image_mean = 0
         self.preprocess_example = pr.ExamplePreprocess(target_hw=dataset_cfg.INPUT_RESOLUTION,
                                                        dataset_cfg=dataset_cfg,
                                                        max_lane=max_lane,
@@ -55,9 +56,15 @@ class ExampleMaker:
 
     def show_example(self, example, index):
         image_dir = os.path.join(self.tfr_drive_path, "test_image")
-        os.makedirs(image_dir,exist_ok=True)
+        os.makedirs(image_dir, exist_ok=True)
 
         image = example["image"]
+        # if np.sum(example['inst_lane'][:, 10]) >= 2:
+        #
+        #     if self.del_night(example):
+        #         self.save_txt(self.data_reader.frame_names[index])
+        # else:
+        #     pass
 
         image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.category_names)
         cv2.imshow("image with feature bboxes", image)
@@ -65,3 +72,41 @@ class ExampleMaker:
         if self.save_image:
             image_file = os.path.join(self.tfr_drive_path, "test_image", str(index) + ".png")
             cv2.imwrite(image_file, image)
+
+    def save_txt(self, data):
+        save_txt_file_name = os.path.join(self.tfr_drive_path, f'new_train.txt')
+
+        if not os.path.exists(save_txt_file_name):
+
+            with open(save_txt_file_name, "w") as f:
+                f.write(data)
+        else:
+            with open(save_txt_file_name, "r") as f:
+                line_list = f.readlines()
+
+                line_list.append("\n" + data)
+            with open(save_txt_file_name, "w") as f:
+                for line in line_list:
+                    f.write(line)
+
+    def del_night(self, example):
+        image = example["image"]
+        image_mean = np.mean(image[:, :, :])
+        if 50 < image_mean < 120:
+            if image_mean > self.image_mean:
+                self.image_mean = image_mean
+            return True
+        elif 120 < image_mean < 140:
+            if image_mean > self.image_mean:
+                self.image_mean = image_mean
+            cv2.imshow("image with feature bboxes", image)
+            cv2.waitKey(10)
+        else:
+            if image_mean > self.image_mean:
+                self.image_mean = image_mean
+            cv2.imshow("image with feature bboxes", image)
+            key = cv2.waitKey()
+            if key == ord('s'):
+                return True
+
+        return False

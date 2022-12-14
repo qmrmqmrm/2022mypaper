@@ -54,12 +54,12 @@ class SavePred:
             file = open(os.path.join(filename), 'w')
             text_to_write = ''
             for n in range(lane["lane_fpoints"].shape[0]):
-                fpoints = lane["lane_fpoints"][n].reshape(-1, 2) * np.array(im_shape[:2]) + \
+                fpoints = lane["lane_fpoints"][n].reshape(-1, 2) * np.array(im_shape[1:3]) + \
                           np.array([self.crop_tlbr[0], self.crop_tlbr[1]])
 
                 xys = list()
                 for index in range(len(fpoints) - 1):
-                    alpha = (fpoints[index + 1, 0] - fpoints[index, 0]) / (fpoints[index + 1, 1] - fpoints[index, 1])
+                    alpha = (fpoints[index + 1, 0] - fpoints[index, 0]) / (fpoints[index + 1, 1] - fpoints[index, 1]+1e-10)
                     beta = fpoints[index, 0] - alpha * fpoints[index, 1]
                     mask = (self.y_axis < fpoints[index, 0]) * (self.y_axis > fpoints[index + 1, 0])
                     y = self.y_axis[mask]

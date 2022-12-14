@@ -159,6 +159,7 @@ class TfrecordMaker:
                               f"drive: {self.drive_index}/{index}/{self.drive_example_count}/{num_drive_frames} | "
                               f"total: {self.total_example_count} | time: {timer() - time1:1.4f}")
         print("")
+        # example_maker.save_list_txt()
         return drive_example
 
     def verify_example(self, drive_example, example):

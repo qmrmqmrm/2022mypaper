@@ -116,6 +116,25 @@ class CustomDeformConv2D:
         return x
 
 
+class CustomMax2D:
+    CALL_COUNT = -1
+
+    def __init__(self, pool_size=3, strides=1, padding="same", scope=None):
+        # save arguments for Conv2D layer
+        self.pool_size = pool_size
+        self.strides = strides
+        self.padding = padding
+        self.scope = scope
+
+    def __call__(self, x, name=None):
+        CustomMax2D.CALL_COUNT += 1
+        index = CustomMax2D.CALL_COUNT
+        name = f"maxpool{index:03d}" if name is None else f"{name}/{index:03d}"
+        name = f"{self.scope}/{name}" if self.scope else name
+
+        x = layers.MaxPooling2D(self.pool_size, self.strides, self.padding, name=name)(x)
+        return x
+
 class NonMaximumSuppressionBox:
     def __init__(self, max_out=cfg.NmsInfer.MAX_OUT,
                  iou_thresh=cfg.NmsInfer.IOU_THRESH,

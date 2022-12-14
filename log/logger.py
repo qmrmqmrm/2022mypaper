@@ -15,6 +15,7 @@ import config as cfg
 import config_dir.util_config as uc
 from log.save_pred import SavePred
 
+
 class Logger:
     def __init__(self, visual_log, exhaustive_log, loss_names, ckpt_path, epoch, is_train, val_only):
         self.history_logger = HistoryLog(loss_names, is_train)

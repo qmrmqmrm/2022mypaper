@@ -17,5 +17,7 @@ def train_main():
 
 if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
     np.set_printoptions(precision=4, suppress=True, linewidth=100)
     train_main()
