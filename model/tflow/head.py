@@ -44,6 +44,7 @@ class HeadBase:
         self.box_out_channels = box_out_channels if box_out_channels is not None else None
         self.num_lane_anchors_per_scale = num_lane_anchors_per_scale if num_lane_anchors_per_scale is not None else None
         self.lane_out_channels = lane_out_channels if lane_out_channels is not None else None
+        self.lane_feature = cfg.ModelOutput.LANE_FEATURE
 
     def make_lane_output(self, x, channel):
         batch_mesh = x.shape[0]
@@ -77,7 +78,7 @@ class SingleOutput(HeadBase):
                 output_features.append(self.make_output(feature, channel))
 
         if cfg.ModelOutput.LANE_DET:
-            conv_lane = self.make_lane_output(input_features[1], 512)
+            conv_lane = self.make_lane_output(input_features[self.lane_feature], 512)
             output_features.append(conv_lane)
         return output_features
 

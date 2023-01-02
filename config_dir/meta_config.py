@@ -125,6 +125,7 @@ class Dataloader:
 class ModelOutput:
     FEATURE_SCALES = [8, 16, 32]
     LANE_DET = True
+    LANE_FEATURE = 1
     # CATEGORY_LEVEL = 1~3    # TODO
     MINOR_CTGR = False
     SPEED_LIMIT = False
@@ -191,7 +192,7 @@ class Train:
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN
-    DETAIL_LOG_EPOCHS = list(range(5, 100, 5))
+    DETAIL_LOG_EPOCHS = list(range(10, 100, 10))
     IGNORE_MASK = True
     # AUGMENT_PROBS = {"Flip": 0.2}
 
