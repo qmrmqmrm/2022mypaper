@@ -323,6 +323,7 @@ class LaneFeatureGenerator(ObjectDistribPolicy):
         super().__init__(imshape, anchors_per_scale)
         self.lane_num = cfg.Dataloader.MAX_LANE_PER_IMAGE
         self.lane_points = cfg.Dataloader.MAX_POINTS_PER_LANE
+        self.lane_feature = cfg.ModelOutput.LANE_FEATURE
         self.lane_channels = lane_channels
 
     def __call__(self, features):
@@ -337,7 +338,7 @@ class LaneFeatureGenerator(ObjectDistribPolicy):
         center_points = inst_lane["lane_fpoints"][..., 4:6]
         lanes = inst_lane["merged"]
         batch = lane_points.shape[0]
-        lane_gt_features = np.zeros((batch, self.feat_shapes[1][0], self.feat_shapes[1][1], 1, self.lane_channels),
+        lane_gt_features = np.zeros((batch, self.feat_shapes[self.lane_feature][0], self.feat_shapes[self.lane_feature][1], 1, self.lane_channels),
                                     dtype=np.float32)
         for b in range(batch):
             center_point = center_points[b]
@@ -349,12 +350,12 @@ class LaneFeatureGenerator(ObjectDistribPolicy):
                 spts = points[0:-1]
                 epts = points[1:]
                 # (11, N-1, 2)
-                heat_points = [((i / 10) * spts + ((10 - i) / 10) * epts) * self.feat_shapes[1] for i in range(11)]
+                heat_points = [((i / 10) * spts + ((10 - i) / 10) * epts) * self.feat_shapes[self.lane_feature] for i in range(11)]
                 heat_points = np.array(heat_points, dtype=np.int32).reshape((-1, 2))  # (11*(N-1), 2)
                 heat_points = np.unique(heat_points, axis=0)
                 lane_gt_features[b, heat_points[:, 0], heat_points[:, 1], 0, 0] = 1
 
-            center_points_pixel = (center_point * self.feat_shapes[1]).astype(np.int)
+            center_points_pixel = (center_point * self.feat_shapes[self.lane_feature]).astype(np.int)
             lanes_per_batch = lanes[b][center_valid_mask]
             lane_gt_features[b, center_points_pixel[:, 0], center_points_pixel[:, 1], 0, 1:] = lanes_per_batch
         lane_gt_features = self.slice_and_merge([lane_gt_features])

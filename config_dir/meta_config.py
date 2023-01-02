@@ -4,11 +4,11 @@ import numpy as np
 
 
 class Paths:
-    RESULT_ROOT = "/home/dolphin/kim_workspace"
-    DATAPATH = "/media/dolphin/intHDD/culane/tfrecord"
+    RESULT_ROOT = "/home/cheetah/kim_workspace"
+    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
-    CONFIG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config.py'
-    META_CFG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config_dir/meta_config.py'
+    CONFIG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config.py'
+    META_CFG_FILENAME = '/home/cheetah/kim_workspace/2022mypaper/config_dir/meta_config.py'
 
 
 class Datasets:
@@ -26,7 +26,7 @@ class Datasets:
 
     class Culane:
         NAME = "culane"
-        PATH = "/media/dolphin/intHDD/culane"
+        PATH = "/media/cheetah/IntHDD/datasets/culane"
         CATEGORIES_TO_USE = ["Lane1, Lane2, Lane3, Lane4"]
         CATEGORY_REMAP = {}
         # INPUT_RESOLUTION = (590, 1640)
@@ -125,6 +125,7 @@ class Dataloader:
 class ModelOutput:
     FEATURE_SCALES = [8, 16, 32]
     LANE_DET = True
+    LANE_FEATURE = 1
     # CATEGORY_LEVEL = 1~3    # TODO
     MINOR_CTGR = False
     SPEED_LIMIT = False
@@ -155,7 +156,7 @@ class ModelOutput:
 
 
 class Architecture:
-    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][2]
+    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][3]
     NECK = ["FPN", "PAN", "BiFPN"][1]
     HEAD = ["Single", "Double", "Efficient"][0]
 
@@ -183,7 +184,7 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v4_no_night"
+    CKPT_NAME = "culane_effi"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
@@ -191,7 +192,7 @@ class Train:
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN
-    DETAIL_LOG_EPOCHS = list(range(5, 100, 5))
+    DETAIL_LOG_EPOCHS = list(range(10, 100, 10))
     IGNORE_MASK = True
     # AUGMENT_PROBS = {"Flip": 0.2}
 
