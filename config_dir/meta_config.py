@@ -155,7 +155,7 @@ class ModelOutput:
 
 
 class Architecture:
-    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][2]
+    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][3]
     NECK = ["FPN", "PAN", "BiFPN"][1]
     HEAD = ["Single", "Double", "Efficient"][0]
 
@@ -183,7 +183,7 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v4_no_night"
+    CKPT_NAME = "culane_v5_efficient"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}

@@ -270,3 +270,69 @@ class Efficientnet(BackboneBase):
         feature_l = efficient.get_layer("top_conv").input
         features.append(feature_l)
         return features
+
+
+class DLA(BackboneBase):
+    def __init__(self, conv_kwargs, training):
+        super().__init__(conv_kwargs)
+        self.block_nums = cfg.Architecture.Resnet.LAYER[1]
+        self.chennels = cfg.Architecture.Resnet.CHENNELS
+        self.conv2d_k7s2 = mu.CustomConv2D(kernel_size=7, strides=2, padding="same", **conv_kwargs)
+        self.maxpool2d_p3 = mu.CustomMax2D(pool_size=3, strides=2, padding="same", scope="back")
+        self.conv2d_k1s2 = mu.CustomConv2D(kernel_size=1, strides=2, **conv_kwargs)
+        self.conv2d_k1s2na = mu.CustomConv2D(kernel_size=1, strides=2, activation=False)
+        self.conv2d_k1na = mu.CustomConv2D(kernel_size=1, activation=False)
+        self.conv2d_k3s2na = mu.CustomConv2D(kernel_size=3, strides=2, activation=False)
+        self.dcn = mu.CustomDeformConv2D(scope="back")
+        self.act = layers.ReLU()
+
+    def __call__(self, input_tensor):
+        conv = self.stem(input_tensor)
+        res_conv = conv
+        features = list()
+        layer_features = list()
+
+        for layer_num, block_num in enumerate(self.block_nums):
+            filters = [self.chennels[layer_num], self.chennels[layer_num + 2]]
+            first_layer = True if layer_num == 0 else False
+            dcn = True if layer_num == 3 else False
+            for num in range(block_num):
+                first_conv = True if num == 0 else False
+                res_conv = self.bottleneck(res_conv, filters, dcn=dcn, first_conv=first_conv, first_layer=first_layer)
+            layer_features.append(res_conv)
+
+        features.append(layer_features[1])
+        features.append(layer_features[2])
+        features.append(layer_features[3])
+        return features
+
+    def stem(self, inputs):
+        x = self.conv2d_k7s2(inputs, 64)
+        x = self.maxpool2d_p3(x)
+        return x
+
+    def bottleneck(self, inputs, filters, dcn=False, first_conv=None, first_layer=False):
+        filter1, filter2 = filters
+
+        if not first_layer and first_conv:
+            x = self.conv2d_k1s2(inputs, filter1)
+            shortcut = self.conv2d_k1s2na(inputs, filter2)
+
+        elif first_layer and first_conv:
+            x = self.conv2d_k1(inputs, filter1)
+            shortcut = self.conv2d_k1na(inputs, filter2)
+
+        else:
+            x = self.conv2d_k1(inputs, filter1)
+            shortcut = inputs
+
+        if dcn:
+            x = self.dcn(x, 512)
+        else:
+            x = self.conv2d(x, filter1)
+        x = self.conv2d_k1na(x, filter2)
+
+        x = x + shortcut
+        act = layers.ReLU()
+        x = act(x)
+        return x

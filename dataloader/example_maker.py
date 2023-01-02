@@ -69,7 +69,7 @@ class ExampleMaker:
         #         self.save_txt(self.data_reader.frame_names[index])
         # else:
         #     pass
-
+        self.save_txt(self.data_reader.frame_names[index])
         image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.num_lane)
         cv2.imshow("image with feature bboxes", image)
         cv2.waitKey(1)
@@ -100,17 +100,18 @@ class ExampleMaker:
             if image_mean > self.image_mean:
                 self.image_mean = image_mean
             return True
-        elif 120 < image_mean < 140:
+        elif 120 < image_mean:
             if image_mean > self.image_mean:
                 self.image_mean = image_mean
-            cv2.imshow("image with feature bboxes", image)
-            cv2.waitKey(10)
-        else:
-            if image_mean > self.image_mean:
-                self.image_mean = image_mean
-            cv2.imshow("image with feature bboxes", image)
-            key = cv2.waitKey()
-            if key == ord('s'):
-                return True
+            return True
+            # cv2.imshow("image with feature bboxes", image)
+            # cv2.waitKey(10)
+        # else:
+        #     if image_mean > self.image_mean:
+        #         self.image_mean = image_mean
+        #     cv2.imshow("image with feature bboxes", image)
+        #     key = cv2.waitKey()
+        #     if key == ord('s'):
+        #         return True
 
         return False

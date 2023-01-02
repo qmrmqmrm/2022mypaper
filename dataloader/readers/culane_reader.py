@@ -36,7 +36,7 @@ class CULaneReader(DatasetReaderBase):
         super().__init__(drive_path, split, dataset_cfg)
 
     def init_drive(self, drive_path, split):
-        testset_file = op.join(drive_path, "list", f'{split}.txt')
+        testset_file = op.join(drive_path, "list", f'new_{split}.txt')
         frame_names = self.push_list(drive_path, testset_file)
         frame_names.sort()
         print("[CULaneReader.init_drive] # frames:", len(frame_names), "first:", frame_names[0])
@@ -47,8 +47,9 @@ class CULaneReader(DatasetReaderBase):
         with open(testset_file, 'r') as f:
             lines = f.readlines()
             for line in lines:
-                line = line[1:]
-                target_file = op.join(drive_path, line).strip('\n')
+                # line = line[1:]
+                target_file = "/".join(line.strip('\n').split('/')[-3])
+                target_file = op.join(drive_path, target_file)
                 test_list.append(target_file)
         return test_list
 
