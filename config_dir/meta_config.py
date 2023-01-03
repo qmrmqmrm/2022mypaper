@@ -4,11 +4,11 @@ import numpy as np
 
 
 class Paths:
-    RESULT_ROOT = "/home/dolphin/kim_workspace"
-    DATAPATH = "/media/dolphin/intHDD/culane/tfrecord"
+    RESULT_ROOT = "/home/gorilla/kim_workspace"
+    DATAPATH = "/media/gorilla/새 볼륨/culane/tfrecord"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
-    CONFIG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config.py'
-    META_CFG_FILENAME = '/home/dolphin/kim_workspace/2022mypaper/config_dir/meta_config.py'
+    CONFIG_FILENAME = '/home/gorilla/kim_workspace/2022mypaper/config.py'
+    META_CFG_FILENAME = '/home/gorilla/kim_workspace/2022mypaper/config_dir/meta_config.py'
 
 
 class Datasets:
@@ -26,7 +26,7 @@ class Datasets:
 
     class Culane:
         NAME = "culane"
-        PATH = "/media/dolphin/intHDD/culane"
+        PATH = "/media/gorilla/새 볼륨/culane"
         CATEGORIES_TO_USE = ["Lane1, Lane2, Lane3, Lane4"]
         CATEGORY_REMAP = {}
         # INPUT_RESOLUTION = (590, 1640)
@@ -156,7 +156,7 @@ class ModelOutput:
 
 
 class Architecture:
-    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][3]
+    BACKBONE = ["Resnet", "Resnet_vd", "CSPDarknet53", "Efficientnet"][2]
     NECK = ["FPN", "PAN", "BiFPN"][1]
     HEAD = ["Single", "Double", "Efficient"][0]
 
@@ -184,7 +184,7 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v5_efficient"
+    CKPT_NAME = "culane_v6_20p"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}

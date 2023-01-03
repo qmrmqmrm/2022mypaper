@@ -48,7 +48,7 @@ class CULaneReader(DatasetReaderBase):
             lines = f.readlines()
             for line in lines:
                 # line = line[1:]
-                target_file = "/".join(line.strip('\n').split('/')[-3])
+                target_file = "/".join(line.strip('\n').split('/')[-3:])
                 target_file = op.join(drive_path, target_file)
                 test_list.append(target_file)
         return test_list

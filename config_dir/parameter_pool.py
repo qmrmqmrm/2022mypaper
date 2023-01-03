@@ -84,7 +84,7 @@ class Uplus2Params:
 
 
 class TfrParams:
-    NUM_LANE_POINT = 5
+    NUM_LANE_POINT = 20
     MIN_PIX = {
         'train': {"Bgd": 0, "Pedestrian": 86, "Car": 110, "Truck": 124, "Bus": 230, "Motorcycle": 48,
                   "Traffic light": 52, "Traffic sign": 33, "Road mark": 30, "Bicycle": 48,

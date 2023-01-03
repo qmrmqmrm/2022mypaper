@@ -21,7 +21,7 @@ class ExampleMaker:
         self.category_names = category_names
         self.include_lane = dataset_cfg.INCLUDE_LANE
         self.tfr_drive_path = tfr_drive_path
-        self.save_image = True
+        self.save_image = False
         self.image_mean = 0
         self.num_lane =num_lane
         self.preprocess_example = pr.ExamplePreprocess(target_hw=dataset_cfg.INPUT_RESOLUTION,
@@ -43,7 +43,7 @@ class ExampleMaker:
         example["lanes_point"], example["lanes_type"] = self.data_reader.get_raw_lane_pts(index, raw_hw_shape)
         example = self.preprocess_example(example)
         # if index % 10 == 5:
-        self.show_example(example, index)
+        # self.show_example(example, index)
         return example
 
     def merge_lane_and_category(self, lanes, categories):
