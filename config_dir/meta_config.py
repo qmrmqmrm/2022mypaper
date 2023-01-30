@@ -5,7 +5,7 @@ import numpy as np
 
 class Paths:
     RESULT_ROOT = "/home/cheetah/kim23paper"
-    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord_test"
+    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord_nonight"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
     CONFIG_FILENAME = '/home/cheetah/kim23paper/2022mypaper/config.py'
     META_CFG_FILENAME = '/home/cheetah/kim23paper/2022mypaper/config_dir/meta_config.py'
@@ -110,11 +110,11 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v4_no_night"
+    CKPT_NAME = "culane_test"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
-    DATA_BATCH_SIZE = 32
+    DATA_BATCH_SIZE = 2
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN

@@ -13,10 +13,10 @@ class LossComb:
 class TrainingPlan:
     UPLUS_PLAN = [
         # ("uplus", 1, 0.0000001, LossComb.FULL_COMBINATION, True),
-        ("culane", 5, 0.001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 5, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 5, 0.00001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 5, 0.000001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.00001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 10, 0.000001,  LossComb.FULL_COMBINATION, True),
     ]
 
 
