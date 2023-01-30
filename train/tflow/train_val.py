@@ -46,7 +46,7 @@ class TrainValBase:
             # if step >= 10:
             #     break
 
-        print("")
+        # print("")
         logger.finalize(epoch_start)
         if self.is_train and cfg.Scheduler.LOG:
             scheduler.save_log()

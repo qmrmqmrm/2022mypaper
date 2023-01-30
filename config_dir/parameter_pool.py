@@ -13,14 +13,10 @@ class LossComb:
 class TrainingPlan:
     UPLUS_PLAN = [
         # ("uplus", 1, 0.0000001, LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
-        ("culane", 10, 0.0001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 5, 0.001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 5, 0.0001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 5, 0.00001,  LossComb.FULL_COMBINATION, True),
+        ("culane", 5, 0.000001,  LossComb.FULL_COMBINATION, True),
     ]
 
 
@@ -84,7 +80,7 @@ class Uplus2Params:
 
 
 class TfrParams:
-    NUM_LANE_POINT = 20
+    NUM_LANE_POINT = 5
     MIN_PIX = {
         'train': {"Bgd": 0, "Pedestrian": 86, "Car": 110, "Truck": 124, "Bus": 230, "Motorcycle": 48,
                   "Traffic light": 52, "Traffic sign": 33, "Road mark": 30, "Bicycle": 48,

@@ -23,7 +23,7 @@ class Logger:
         self.save_pred = SavePred(op.join(ckpt_path, "result"))
         self.exhaustive_box_logger = ExhaustiveBoxLog(loss_names) if exhaustive_log and cfg.ModelOutput.BOX_DET else None
         self.exhaustive_lane_logger = ExhaustiveLaneLog(loss_names) if exhaustive_log and cfg.ModelOutput.LANE_DET else None
-        self.visual_logger = VisualLog(ckpt_path, epoch) if visual_log else None
+        self.visual_logger = VisualLog(ckpt_path, epoch,  val_only) if visual_log else None
         self.history_filename = op.join(ckpt_path, "history.csv")
         self.num_channel = cfg.ModelOutput.NUM_BOX_MAIN_CHANNELS
         self.exhaust_path = op.join(ckpt_path, "exhaust_log")

@@ -43,7 +43,7 @@ class ExampleMaker:
         example["lanes_point"], example["lanes_type"] = self.data_reader.get_raw_lane_pts(index, raw_hw_shape)
         example = self.preprocess_example(example)
         # if index % 10 == 5:
-        # self.show_example(example, index)
+        self.show_example(example, index)
         return example
 
     def merge_lane_and_category(self, lanes, categories):
@@ -63,13 +63,13 @@ class ExampleMaker:
         os.makedirs(image_dir, exist_ok=True)
 
         image = example["image"]
-        # if np.sum(example['inst_lane'][:, 10]) >= 2:
-        #
-        #     if self.del_night(example):
-        #         self.save_txt(self.data_reader.frame_names[index])
-        # else:
-        #     pass
-        self.save_txt(self.data_reader.frame_names[index])
+        if np.sum(example['inst_lane'][:, 10]) >= 2:
+
+            if self.del_night(example):
+                self.save_txt(self.data_reader.frame_names[index])
+        else:
+            pass
+
         image = tu.draw_lanes(image, example["lanes_point"], example["inst_lane"], self.num_lane)
         cv2.imshow("image with feature bboxes", image)
         cv2.waitKey(1)
@@ -100,18 +100,17 @@ class ExampleMaker:
             if image_mean > self.image_mean:
                 self.image_mean = image_mean
             return True
-        elif 120 < image_mean:
+        elif 120 < image_mean < 140:
             if image_mean > self.image_mean:
                 self.image_mean = image_mean
-            return True
-            # cv2.imshow("image with feature bboxes", image)
-            # cv2.waitKey(10)
-        # else:
-        #     if image_mean > self.image_mean:
-        #         self.image_mean = image_mean
-        #     cv2.imshow("image with feature bboxes", image)
-        #     key = cv2.waitKey()
-        #     if key == ord('s'):
-        #         return True
+            cv2.imshow("image with feature bboxes", image)
+            cv2.waitKey(10)
+        else:
+            if image_mean > self.image_mean:
+                self.image_mean = image_mean
+            cv2.imshow("image with feature bboxes", image)
+            key = cv2.waitKey()
+            if key == ord('s'):
+                return True
 
         return False

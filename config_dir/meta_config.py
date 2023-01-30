@@ -4,29 +4,18 @@ import numpy as np
 
 
 class Paths:
-    RESULT_ROOT = "/home/gorilla/kim_workspace"
-    DATAPATH = "/media/gorilla/새 볼륨/culane/tfrecord"
+    RESULT_ROOT = "/home/cheetah/kim23paper"
+    DATAPATH = "/media/cheetah/IntHDD/datasets/culane/tfrecord_test"
     CHECK_POINT = op.join(RESULT_ROOT, "ckpt")
-    CONFIG_FILENAME = '/home/gorilla/kim_workspace/2022mypaper/config.py'
-    META_CFG_FILENAME = '/home/gorilla/kim_workspace/2022mypaper/config_dir/meta_config.py'
+    CONFIG_FILENAME = '/home/cheetah/kim23paper/2022mypaper/config.py'
+    META_CFG_FILENAME = '/home/cheetah/kim23paper/2022mypaper/config_dir/meta_config.py'
 
 
 class Datasets:
     # specific dataset configs MUST have the same items
-    class Kitti:
-        NAME = "kitti"
-        PATH = "/home/cheetah-01/IntHDD/datasets/kitti"
-        CATEGORIES_TO_USE = ["Pedestrian", "Car", "Van", "Truck", "Cyclist"]
-        CATEGORY_REMAP = {"Pedestrian": "Person", "Cyclist": "Bicycle"}
-        INPUT_RESOLUTION = (256, 832)
-        INCLUDE_LANE = [True, False][1]
-        # (4,13) * 64
-        CROP_TLBR = [0, 0, 0, 0]
-        # crop [top, left, bottom, right] or [y1 x1 y2 x2]
-
     class Culane:
         NAME = "culane"
-        PATH = "/media/gorilla/새 볼륨/culane"
+        PATH = "/media/cheetah/IntHDD/datasets/culane"
         CATEGORIES_TO_USE = ["Lane1, Lane2, Lane3, Lane4"]
         CATEGORY_REMAP = {}
         # INPUT_RESOLUTION = (590, 1640)
@@ -35,67 +24,6 @@ class Datasets:
         # (4,13) * 64
         CROP_TLBR = [14, 20, 0, 20]
         # crop [top, left, bottom, right] or [y1 x1 y2 x2]
-
-    class Uplus:
-        NAME = "uplus"
-        PATH = "/home/cheetah/kim_workspace/uplus22"
-        CATEGORIES_TO_USE = params.Uplus2Params.CATEGORIES_TO_USE
-        CATEGORY_REMAP = params.Uplus2Params.CATEGORY_REMAP
-        LANE_TYPES = params.Uplus2Params.LANE_TYPES
-        LANE_REMAP = params.Uplus2Params.LANE_REMAP
-        INPUT_RESOLUTION = (512, 1280)
-        CROP_TLBR = [450, 180, 25, 180]
-        # CROP_TLBR = [300, 0, 0, 0]
-        # crop [top, left, bottom, right] or [y1 x1 y2 x2]
-        INCLUDE_LANE = [True, False][0]
-
-    class Uplus21:
-        NAME = "uplus21"
-        PATH = "/home/dolphin/kim_workspace/uplus21"
-        CATEGORIES_TO_USE = params.UplusParams.CATEGORIES_TO_USE
-        CATEGORY_REMAP = params.UplusParams.CATEGORY_REMAP
-        LANE_TYPES = params.UplusParams.LANE_TYPES
-        LANE_REMAP = params.UplusParams.LANE_REMAP
-        INPUT_RESOLUTION = (512, 1280)
-        CROP_TLBR = [0, 0, 0, 0]
-        # crop [top, left, bottom, right] or [y1 x1 y2 x2]
-        INCLUDE_LANE = [True, False][0]
-
-    class City:
-        NAME = "city"
-        PATH = "/media/cheetah/IntHDD/datasets/city"
-        CATEGORIES_TO_USE = ['person', 'rider', 'car', 'truck', 'bus', 'motorcycle', 'bicycle']
-        CATEGORY_REMAP = {"person": "Person", "rider": "Person", "car": "Car", "bus": "Bus",
-                          "truck": "Truck", "motorcycle": "Motorcycle", "bicycle": "Bicycle"}
-        INPUT_RESOLUTION = (1024, 2048)
-        CROP_TLBR = [0, 0, 0, 0]
-        INCLUDE_LANE = [True, False][1]
-        DIST_QUANTILE = 0.2
-
-    class A2d2:
-        NAME = "a2d2"
-        PATH = "/media/cheetah/IntHDD/datasets/a2d2/camera_lidar_semantic_bboxes.zip"
-        CATEGORIES_TO_USE = ["Car 1", "Car 2", "Car 3", "Car 4",
-                             "Bicycle 1", "Bicycle 2", "Bicycle 3", "Bicycle 4",
-                             "Pedestrian 1", "Pedestrian 2", "Pedestrian 3",
-                             "Truck 1", "Truck 2", "Truck 3",
-                             "Small vehicles 1", "Small vehicles 2", "Small vehicles 3"]
-        CATEGORY_REMAP = {"Car 1": "Car", "Car 2": "Car", "Car 3": "Car", "Car 4": "Car",
-                          "Bicycle 1": "Bicycle", "Bicycle 2": "Bicycle", "Bicycle 3": "Bicycle",
-                          "Bicycle 4": "Bicycle",
-                          "Pedestrian 1": "Person", "Pedestrian 2": "Person", "Pedestrian 3": "Person",
-                          "Truck 1": "Truck", "Truck 2": "Truck", "Truck 3": "Truck",
-                          "Small vehicles 1": "Motorcycle", "Small vehicles 2": "Motorcycle",
-                          "Small vehicles 3": "Motorcycle"}
-        INPUT_RESOLUTION = (512, 1280)  # (4,13) * 64
-        CROP_TLBR = [0, 0, 0, 0]        # crop [top, left, bottom, right] or [y1 x1 y2 x2]
-        MAX_LANE_PARAM = 50
-        CATEGORY_NAMES = ["Bgd", "Pedestrian", "Car"]
-        SHARD_SIZE = 2000
-        INCLUDE_LANE = [True, False][1]
-        SEGMAP_SCALE = 4
-        PIXEL_LIMIT = 50
-        DIST_QUANTILE = 0.2
 
     DATASET_CONFIG = None
     TARGET_DATASET = "culane"
@@ -110,8 +38,6 @@ class Dataloader:
         # "city": ("train", "val"),
         # "a2d2": ("train", "val"),
     }
-    MAX_BBOX_PER_IMAGE = 100
-    MAX_DONT_PER_IMAGE = 100
     MAX_LANE_PER_IMAGE = 4
     MAX_POINTS_PER_LANE = 50
     NUM_LANE_POINT = params.TfrParams.NUM_LANE_POINT
@@ -184,11 +110,11 @@ class Architecture:
 
 
 class Train:
-    CKPT_NAME = "culane_v6_20p"
+    CKPT_NAME = "culane_v4_no_night"
     MODE = ["eager", "graph", "distribute"][1]
     AUGMENT_PROBS = None
     # AUGMENT_PROBS = {"ColorJitter": 0.5, "CropResize": 1.0, "Blur": 0.2}
-    DATA_BATCH_SIZE = 2
+    DATA_BATCH_SIZE = 32
     BATCH_SIZE = DATA_BATCH_SIZE * 2 if AUGMENT_PROBS else DATA_BATCH_SIZE
     DATSET_SIZE = DATA_BATCH_SIZE * 20
     TRAINING_PLAN = params.TrainingPlan.UPLUS_PLAN
@@ -258,9 +184,9 @@ class NmsOptim:
     SCORE_CANDIDATES = np.arange(0.02, 0.4, 0.02)
     MAX_OUT_CANDIDATES = np.arange(5, 20, 1)
 
-    LANE_IOU_CANDIDATES = np.arange(0.1, .9, 0.05)
-    LANE_SCORE_CANDIDATES = np.arange(0.02, 0.4, 0.02)
-    LANE_MAX_OUT_CANDIDATES = np.arange(1, 3, 1)
+    LANE_IOU_CANDIDATES = np.arange(0.3, .7, 0.05)
+    LANE_SCORE_CANDIDATES = np.arange(0.02, 0.2, 0.02)
+    LANE_MAX_OUT_CANDIDATES = np.arange(1, 2, 1)
 
 
 class Validation:

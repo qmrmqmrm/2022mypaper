@@ -31,9 +31,8 @@ class EvaluateNmsParams:
 
     def create_eval_file(self):
         dataset, steps, model, anchors_per_scale, feature_creator = self.load_dataset_model(self.dataset_name, self.ckpt_path)
-        perf_data, perf_data_train = self.collect_recall_precision(dataset, steps, model, self.num_ctgr, anchors_per_scale, feature_creator)
+        perf_data = self.collect_recall_precision(dataset, steps, model, self.num_ctgr, anchors_per_scale, feature_creator)
         self.save_results(perf_data, self.ckpt_path, "")
-        self.save_results(perf_data_train, self.ckpt_path, "_train")
 
     def load_dataset_model(self, dataset_name, ckpt_path):
         batch_size, train_mode, anchors = cfg.Train.BATCH_SIZE, cfg.Train.MODE, cfg.AnchorGeneration.ANCHORS
@@ -69,26 +68,19 @@ class EvaluateNmsParams:
 
     def collect_recall_precision(self, dataset, steps, model, num_ctgr, anchors_per_scale, feature_creator):
         results = {"max_lane": [], "iou_thresh": [], "score_thresh": []}
-        results_train = {"max_lane": [], "iou_thresh": [], "score_thresh": []}
         for max_lane in cfg.NmsOptim.LANE_MAX_OUT_CANDIDATES:
             for iou_thresh in cfg.NmsOptim.LANE_IOU_CANDIDATES:
                 for score_thresh in cfg.NmsOptim.LANE_SCORE_CANDIDATES[::-1]:
                     results["max_lane"].append(max_lane)
                     results["iou_thresh"].append(iou_thresh)
                     results["score_thresh"].append(score_thresh)
-                    results_train["max_lane"].append(max_lane)
-                    results_train["iou_thresh"].append(iou_thresh)
-                    results_train["score_thresh"].append(score_thresh)
 
         results = {key: np.array(val) for key, val in results.items()}
-        results_train = {key: np.array(val) for key, val in results_train.items()}
         num_params = results["max_lane"].shape[0]
         accum_keys = ["trpo_lane", "grtr_lane", "pred_lane"]
         init_data = {key: np.zeros((num_params, num_ctgr), dtype=np.float32) for key in accum_keys}
-        init_data_train = {key: np.zeros((num_params, num_ctgr), dtype=np.float32) for key in accum_keys}
 
         results.update(init_data)
-        results_train.update(init_data_train)
         nms_lane = mu.NonMaximumSuppressionLane()
         for step, grtr in enumerate(dataset):
             features = feature_creator(grtr)
@@ -106,13 +98,8 @@ class EvaluateNmsParams:
                 count_per_class = count_true_positives_lane(features["inst_lane"], pred_lanes, num_ctgr,
                                                             img_shape, iou_thresh=cfg.Validation.LANE_TP_IOU_THRESH,
                                                             per_class=True, is_train=False)
-                count_per_class_train = count_true_positives_lane(features["inst_lane"], pred_lanes, num_ctgr,
-                                                            img_shape, iou_thresh=cfg.Validation.LANE_TP_IOU_THRESH,
-                                                            per_class=True, is_train=True)
-
                 for key in accum_keys:
                     results[key][i] += count_per_class[key]
-                    results_train[key][i] += count_per_class_train[key]
 
                 uf.print_progress(f"=== step: {i}/{num_params} {step}/{steps}, took {timer() - start:1.2f}s")
             uf.print_progress(f"=== step: {step}/{steps}, took {timer() - start:1.2f}s")
@@ -128,20 +115,9 @@ class EvaluateNmsParams:
         results["min_perf"] = np.minimum(results["recall_lane"], results["precision_lane"])
         results["avg_perf"] = (results["recall_lane"] + results["precision_lane"]) / 2.
 
-        results_train["recall_lane"] = np.divide(results_train["trpo_lane"], results_train["grtr_lane"],
-                                      out=np.zeros_like(results_train["trpo_lane"]),
-                                      where=(results_train["grtr_lane"] != 0))
-        results_train["precision_lane"] = np.divide(results_train["trpo_lane"], results_train["pred_lane"],
-                                         out=np.zeros_like(results_train["trpo_lane"]),
-                                         where=(results_train["pred_lane"] != 0))
-        results_train["min_perf"] = np.minimum(results_train["recall_lane"], results_train["precision_lane"])
-        results_train["avg_perf"] = (results_train["recall_lane"] + results_train["precision_lane"]) / 2.
-
         for key, val in results.items():
             print(f"results: {key}\n{val[:10]}")
-        for key, val in results_train.items():
-            print(f"results_train: {key}\n{val[:10]}")
-        return results, results_train
+        return results
 
     def convert_tensor_to_numpy(self, feature):
         numpy_feature = dict()
@@ -158,7 +134,6 @@ class EvaluateNmsParams:
     def save_results(self, perf_data, ckpt_path, train):
         param_path = op.join(ckpt_path, f"nms_param_lane{train}")
         os.makedirs(param_path, exist_ok=True)
-        intkeys = ["trpo_lane", "grtr_lane", "pred_lane"]
 
         specific_summary = self.specific_data(perf_data, self.num_ctgr)
         specific_summary.to_csv(op.join(param_path, f"specific_summary.csv"), index=False, float_format="%1.4f")
@@ -367,7 +342,5 @@ if __name__ == "__main__":
     # TODO ap check
     param_optimizer = FindBestParamByAP("")
     param_optimizer.create_all_param_ap("")
-    param_optimizer_train = FindBestParamByAP("_train")
-    param_optimizer_train.create_all_param_ap("_train")
     # param_optimizer.draw_main([11, 12, 13], [0.3, 0.4])
     print("end optimizer")

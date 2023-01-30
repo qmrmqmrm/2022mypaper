@@ -9,7 +9,7 @@ import utils.framework.util_function as uf
 
 
 class VisualLog:
-    def __init__(self, ckpt_path, epoch):
+    def __init__(self, ckpt_path, epoch, val_only):
         self.grtr_log_keys = cfg.Train.LOG_KEYS
         self.pred_log_keys = cfg.Train.LOG_KEYS
         self.vlog_path = op.join(ckpt_path, "vlog", f"ep{epoch:02d}")
@@ -18,7 +18,8 @@ class VisualLog:
             os.makedirs(self.vlog_path)
         if not op.isdir(self.visual_heatmap_path):
             os.makedirs(self.visual_heatmap_path)
-        self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, "val")
+        split = "val" if not val_only else "test"
+        self.image_files = self.init_drive(cfg.Datasets.DATASET_CONFIG.PATH, split)
         self.image_files.sort()
         self.y_axis = np.arange(600, 200, -10)
         self.crop_tlbr = cfg.Datasets.DATASET_CONFIG.CROP_TLBR
@@ -68,6 +69,12 @@ class VisualLog:
             #     a =1
             # grtr_log_keys = ["pred_object", "pred_ctgr_prob", "pred_score", "distance"]
             image_file = self.image_files[step * batch + i]
+            target_dir = "/".join(image_file.strip('\n').split('/')[-3:-1])
+            target_dir = op.join(self.vlog_path, target_dir)
+            os.makedirs(target_dir, exist_ok=True)
+            target_file = "/".join(image_file.strip('\n').split('/')[-3:])
+            target_file = op.join(self.vlog_path, target_file)
+
             image_grtr_orgin = cv2.imread(image_file)
             image_pred_orgin = cv2.imread(image_file)
             image_grtr = uf.to_uint8_image(grtr["image"][i]).numpy()
@@ -114,13 +121,13 @@ class VisualLog:
             vlog_image = np.concatenate([image_pred, image_grtr], axis=0)
             vlog_image_org = np.concatenate([image_pred_orgin, image_grtr_orgin], axis=0)
             # if step % 50 == 10:
-            cv2.imshow("detection_result", vlog_image)
-            cv2.imshow("detection_result_vlog_image_org", vlog_image_org)
-            cv2.waitKey(10)
+            # cv2.imshow("detection_result", vlog_image)
+            # cv2.imshow("detection_result_vlog_image_org", vlog_image_org)
+            # cv2.waitKey(10)
             filename = op.join(self.vlog_path, f"{step * batch + i:05d}.jpg")
-            filename_ori = op.join(self.vlog_path, f"{step * batch + i:05d}_ori.jpg")
+            # filename_ori = op.join(self.vlog_path, f"{step * batch + i:05d}_ori.jpg")
             cv2.imwrite(filename, vlog_image)
-            cv2.imwrite(filename_ori, vlog_image_org)
+            cv2.imwrite(target_file, vlog_image_org)
 
     def exapand_grtr_bbox(self, grtr, pred):
         grtr_boxes = uf.merge_scale(grtr["feat_box"])
